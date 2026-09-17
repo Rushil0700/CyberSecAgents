@@ -1,0 +1,24 @@
+[project]
+name = "marlsoc"
+version = "0.1.0"
+description = "Multi-agent reinforcement learning for autonomous network defense"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26", "matplotlib>=3.8", "pyyaml>=6.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
