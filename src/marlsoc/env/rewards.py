@@ -54,7 +54,18 @@ class RewardConfig:
             and it stops the -10 bleed, netting +8 per step) but never free.
         honeypot_engagement: Blue's payoff when red touches a decoy.
         honeypot_cost: Red's side of the same event. Equal and opposite, deliberately.
-        layer_restored: Blue repairing a breached layer.
+        layer_restored: Blue repairing a breached layer -- **paid once per layer per
+            episode**. PROJECT.md section 5.3 specifies a flat +25 per restoration, and
+            that is farmable: ``tighten_ratelimit`` is legal whenever Layer 1 is down,
+            red re-breaches Layer 1 with ``slow_scan`` at p=0.60 (about two steps), so
+            blue earns roughly +12 a step from the repair loop -- more than the -10 a
+            step bleed it is meant to be preventing. Blue then *profits from red
+            succeeding*. Measured on a trained agent before the fix: 35.1 restorations
+            per episode, contributing +175,750 against a total return of -115,338, or
+            152% of the absolute reward. The agent had learned to farm the shaping term
+            instead of defending, and scored worse than a random defender while doing it.
+            Paying once per layer keeps the intent -- repairing a breached defence is
+            worth something -- and removes the loop.
         step_cost: Charged to both teams, every step. Makes dithering expensive and is
             why an agent that can win in forty steps beats one that takes two hundred.
         detected: Charged to red when a compromised host of its is confirmed. This is the

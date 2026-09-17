@@ -331,3 +331,55 @@ class TestRewardWiring:
         for key in ("step", "outcome", "layers_breached", "hosts_compromised",
                     "mttd", "mttc", "false_positives", "honeypot_hits"):
             assert key in info
+
+
+class TestLayerRestorationCannotBeFarmed:
+    """The reward-shaping trap in section 15, found by decoding a trained Q-table.
+
+    Section 5.3 pays a flat +25 per layer restoration. Because ``tighten_ratelimit`` is
+    legal whenever Layer 1 is down, and red re-breaches Layer 1 with ``slow_scan`` at
+    p=0.60, blue could earn roughly +12 a step from the repair loop -- more than the -10
+    a step bleed it was supposed to prevent. The trained defender restored the perimeter
+    **35.1 times per episode**, collecting +175,750 against a total return of -115,338:
+    152% of its absolute reward came from farming the shaping term, and it scored worse
+    than a random defender while doing it.
+    """
+
+    def _breach_and_restore(self, env, times: int) -> int:
+        paid = 0
+        for _ in range(times):
+            if not env.state.layers.is_breached(Layer.PERIMETER):
+                env.state.record_breach(Layer.PERIMETER)
+            _, _, done, info = env.step({"B_dmz": Action(Verb.TIGHTEN_RATELIMIT)})
+            paid += len(info["events"].layers_restored)
+            if done:
+                break
+        return paid
+
+    def test_only_the_first_restoration_of_a_layer_is_paid(self) -> None:
+        env = MiniCorp()
+        env.reset()
+        assert self._breach_and_restore(env, 10) == 1
+
+    def test_repeated_restoration_is_still_legal_and_still_repairs(self) -> None:
+        """It has to stay available: forcing red to breach the perimeter again is real
+        defensive value, it just is not new reward."""
+        env = MiniCorp()
+        env.reset()
+        env.state.record_breach(Layer.PERIMETER)
+        env.step({"B_dmz": Action(Verb.TIGHTEN_RATELIMIT)})
+        assert not env.state.layers.is_breached(Layer.PERIMETER)
+        env.state.record_breach(Layer.PERIMETER)
+        assert act.is_legal(env.state, "B_dmz", Action(Verb.TIGHTEN_RATELIMIT))
+        env.step({"B_dmz": Action(Verb.TIGHTEN_RATELIMIT)})
+        assert not env.state.layers.is_breached(Layer.PERIMETER)
+
+    def test_the_repair_loop_no_longer_outpays_the_compromise_bleed(self) -> None:
+        """The arithmetic that made farming rational, asserted directly.
+
+        Over any episode, total restoration income is bounded by three layers times +25,
+        which cannot outrun a -10 per step bleed for more than a few steps.
+        """
+        from marlsoc.env import rewards as rw
+        max_income = 3 * rw.DEFAULT.layer_restored
+        assert max_income < abs(rw.DEFAULT.compromised_host_per_step) * 10

@@ -380,7 +380,12 @@ class MiniCorp:
         if verb in act.REINFORCE_LAYER:
             layer = act.REINFORCE_LAYER[verb]
             state.layers = state.layers.restore(layer)
-            events.layers_restored.append(layer)
+            # Repairing again is legal and still useful -- red must re-breach it -- but
+            # it is only *paid* the first time. See RewardConfig.layer_restored for the
+            # measurement that forced this.
+            if layer not in state.restored_layers:
+                state.restored_layers.add(layer)
+                events.layers_restored.append(layer)
             return
 
         raise ValueError(f"unhandled blue verb {verb}")

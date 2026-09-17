@@ -99,6 +99,10 @@ class EpisodeState:
             cannot be compromised, costs no availability, and does nothing at all once
             the host is already compromised -- which is what makes ``block`` a genuinely
             different decision from ``isolate`` rather than a second name for it.
+        restored_layers: Layers blue has already been *paid* for restoring this episode.
+            Repairing a layer a second time is still legal and still useful -- it forces
+            red to spend actions breaching it again -- but it is not rewarded twice; see
+            ``rewards.py``.
         honeypots_live: Honeypot slots blue has deployed this episode.
         outcome: Terminal status, or RUNNING.
         detected_step: First step at which any truly compromised host was flagged
@@ -125,6 +129,7 @@ class EpisodeState:
     heat: float = 0.0
     alerts: dict[str, float] = field(default_factory=dict)
     blocked_until: dict[str, int] = field(default_factory=dict)
+    restored_layers: set[Layer] = field(default_factory=set)
     honeypots_live: set[str] = field(default_factory=set)
     outcome: Outcome = Outcome.RUNNING
 
