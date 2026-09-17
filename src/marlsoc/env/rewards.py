@@ -103,7 +103,11 @@ class StepEvents:
     3.8 applied to rewards as well as to metrics.
 
     Attributes:
-        layers_breached: Layers red broke this step. Usually zero or one.
+        layers_breached: Layers red broke this step **for the first time**. Usually zero
+            or one. A re-breach after blue repaired a layer is excluded: it is recovering
+            lost ground, not a new rung of the 5.4 ladder, and paying it again would mean
+            red profits from blue defending -- the mirror of the restoration farm
+            described under ``RewardConfig.layer_restored``.
         layers_restored: Layers blue repaired this step.
         hosts_compromised: Hosts red took this step.
         correct_isolations: Compromised hosts blue isolated this step.

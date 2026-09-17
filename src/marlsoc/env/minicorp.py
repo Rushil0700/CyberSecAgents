@@ -237,8 +237,8 @@ class MiniCorp:
         self._add_noise(noise, host, spec.noise)
 
         if self.rng.random() < self._layer_success(layer, host):
-            state.record_breach(layer)
-            events.layers_breached.append(layer)
+            if state.record_breach(layer):
+                events.layers_breached.append(layer)
 
     def _apply_recon(
         self, action: Action, events: StepEvents, noise: dict[str, float]
@@ -267,8 +267,8 @@ class MiniCorp:
         # Layer 1 falls only to a slow scan, and only from outside the DMZ.
         if slow and state.layers.can_attempt(Layer.PERIMETER):
             if self.rng.random() < topo.BY_NAME[topo.WAF_HOST].bypass_prob:
-                state.record_breach(Layer.PERIMETER)
-                events.layers_breached.append(Layer.PERIMETER)
+                if state.record_breach(Layer.PERIMETER):
+                    events.layers_breached.append(Layer.PERIMETER)
 
     def _apply_intrusion(
         self, action: Action, events: StepEvents, noise: dict[str, float]
@@ -299,8 +299,8 @@ class MiniCorp:
         # Taking a host may breach the layer that guarded its zone.
         layer = self._layer_taken_by(host, action.verb)
         if layer is not None and state.layers.can_attempt(layer):
-            state.record_breach(layer)
-            events.layers_breached.append(layer)
+            if state.record_breach(layer):
+                events.layers_breached.append(layer)
 
     def _layer_taken_by(self, host: topo.Host, verb: Verb) -> Layer | None:
         """Which layer, if any, falls when ``host`` is taken by ``verb``.

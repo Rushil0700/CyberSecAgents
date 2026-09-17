@@ -383,3 +383,60 @@ class TestLayerRestorationCannotBeFarmed:
         from marlsoc.env import rewards as rw
         max_income = 3 * rw.DEFAULT.layer_restored
         assert max_income < abs(rw.DEFAULT.compromised_host_per_step) * 10
+
+
+class TestTheLadderCannotBeFarmedEither:
+    """The mirror of the restoration farm, on red's side.
+
+    Section 5.4 pays +10 for breaching Layer 1. If blue repairs it, red breaches again --
+    and must, to advance. Paying the rung twice would mean red *profits from blue
+    defending*, which is the same perverse incentive pointing the other way. In the run
+    that exposed the restoration farm, blue repaired the perimeter 35 times an episode,
+    so red was collecting an unearned +350 from the same loop.
+    """
+
+    def test_a_re_breach_after_repair_pays_nothing(self) -> None:
+        env = MiniCorp()
+        env.reset()
+        assert env.state.record_breach(Layer.PERIMETER) is True    # first time: paid
+        env.state.layers = env.state.layers.restore(Layer.PERIMETER)
+        assert env.state.record_breach(Layer.PERIMETER) is False   # again: not paid
+
+    def test_a_re_breach_still_advances_the_layer_model(self) -> None:
+        """It has to: red cannot reach the DMZ with Layer 1 standing, so re-breaching is
+        genuine progress even though it is not new reward."""
+        env = MiniCorp()
+        env.reset()
+        env.state.record_breach(Layer.PERIMETER)
+        env.state.layers = env.state.layers.restore(Layer.PERIMETER)
+        assert not env.state.layers.is_breached(Layer.PERIMETER)
+        env.state.record_breach(Layer.PERIMETER)
+        assert env.state.layers.is_breached(Layer.PERIMETER)
+
+    def test_the_first_breach_step_is_not_overwritten_by_a_re_breach(self) -> None:
+        # The layer-breach histogram in section 15 asks *when* red first got through.
+        env = MiniCorp()
+        env.reset()
+        env.state.step = 4
+        env.state.record_breach(Layer.PERIMETER)
+        env.state.layers = env.state.layers.restore(Layer.PERIMETER)
+        env.state.step = 90
+        env.state.record_breach(Layer.PERIMETER)
+        assert env.state.breach_steps[Layer.PERIMETER] == 4
+
+    def test_neither_team_can_profit_from_the_repair_loop(self) -> None:
+        """Both sides of the loop, in one episode: blue repairs, red re-breaches, and
+        after the first of each nobody is paid again."""
+        env = MiniCorp()
+        env.reset()
+        paid_red = paid_blue = 0
+        for _ in range(12):
+            if not env.state.layers.is_breached(Layer.PERIMETER):
+                if env.state.record_breach(Layer.PERIMETER):
+                    paid_red += 1
+            _, _, done, info = env.step({"B_dmz": Action(Verb.TIGHTEN_RATELIMIT)})
+            paid_blue += len(info["events"].layers_restored)
+            if done:
+                break
+        assert paid_red == 1
+        assert paid_blue == 1

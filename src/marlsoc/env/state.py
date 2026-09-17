@@ -99,6 +99,11 @@ class EpisodeState:
             cannot be compromised, costs no availability, and does nothing at all once
             the host is already compromised -- which is what makes ``block`` a genuinely
             different decision from ``isolate`` rather than a second name for it.
+        paid_breaches: Layers red has already been *paid* for breaching this episode.
+            The mirror of ``restored_layers``: if blue restores a layer, red may breach
+            it again -- and must, to make progress -- but does not collect the section
+            5.4 rung a second time. Without this, red profits from blue repairing
+            defences, which is the same perverse incentive in the other direction.
         restored_layers: Layers blue has already been *paid* for restoring this episode.
             Repairing a layer a second time is still legal and still useful -- it forces
             red to spend actions breaching it again -- but it is not rewarded twice; see
@@ -129,6 +134,7 @@ class EpisodeState:
     heat: float = 0.0
     alerts: dict[str, float] = field(default_factory=dict)
     blocked_until: dict[str, int] = field(default_factory=dict)
+    paid_breaches: set[Layer] = field(default_factory=set)
     restored_layers: set[Layer] = field(default_factory=set)
     honeypots_live: set[str] = field(default_factory=set)
     outcome: Outcome = Outcome.RUNNING
@@ -270,10 +276,22 @@ class EpisodeState:
         if self.detected_step is None:
             self.detected_step = self.step
 
-    def record_breach(self, layer: Layer) -> None:
-        """Advance the layer model and stamp when the layer fell."""
+    def record_breach(self, layer: Layer) -> bool:
+        """Advance the layer model and stamp when the layer fell.
+
+        Returns:
+            True if this is the **first** time red has broken this layer this episode,
+            which is when the section 5.4 ladder is paid. A re-breach after blue repaired
+            the layer is real progress -- red has to make it to advance -- but it is
+            recovering lost ground rather than a new achievement, and paying for it again
+            would mean red profits from blue defending.
+        """
         self.layers = self.layers.breach(layer)
-        self.breach_steps[layer] = self.step
+        first = layer not in self.paid_breaches
+        if first:
+            self.paid_breaches.add(layer)
+            self.breach_steps[layer] = self.step
+        return first
 
     def deploy_honeypot(self, host: str) -> None:
         """Bring a honeypot slot onto the network. Idempotent: redeploying an already
