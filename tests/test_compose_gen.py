@@ -71,7 +71,7 @@ class TestConnectivityMatchesTopology:
     def test_logger_does_not_create_a_flat_network(self) -> None:
         """The log sink must not become an any-to-any path between zones."""
         doc = compose_gen.build_compose()
-        assert not _docker_connected(doc, "web-portal", "db-primary")
+        assert not _docker_connected(doc, "web-portal", topo.CROWN_JEWEL)
         assert not _docker_connected(doc, "mail", "ci-runner")
         # ...while still receiving from every zone.
         for zone in topo.DEFENDED_ZONES:
@@ -87,5 +87,11 @@ class TestServices:
     def test_honeypots_are_behind_a_profile(self) -> None:
         # Absent at reset in the twin; not started by default in the lab.
         doc = compose_gen.build_compose()
-        assert doc["services"]["honeypot-corp"]["profiles"] == ["honeypot"]
-        assert "profiles" not in doc["services"]["db-primary"]
+        assert doc["services"]["honeypot-1"]["profiles"] == ["honeypot"]
+        assert "profiles" not in doc["services"][topo.CROWN_JEWEL]
+
+    def test_the_waf_sits_in_front_of_the_dmz(self) -> None:
+        """Layer 1 is host configuration, not segmentation: the gateway shares net-dmz
+        with the services it fronts and has no deeper attachment."""
+        doc = compose_gen.build_compose()
+        assert doc["services"][topo.WAF_HOST]["networks"] == ["net-dmz"]

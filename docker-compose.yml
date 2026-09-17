@@ -16,6 +16,25 @@ networks:
   net-bridge-corp-secure:
     internal: true
 services:
+  edge-gateway:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+    container_name: edge-gateway
+    hostname: edge-gateway
+    environment:
+      HOST_NAME: edge-gateway
+      ZONE: edge
+      ROLE: waf
+      EXPLOIT_PROB: '0.0'
+      BYPASS_PROB: '0.6'
+      NOISE: '3'
+      WEAKNESS: rate threshold evadable by scanning below it
+      IS_GATE: 'true'
+      LOG_SINK: http://logger:8000/ingest
+    networks:
+    - net-dmz
+    restart: unless-stopped
   reverse-proxy:
     build:
       context: ./services
@@ -25,11 +44,12 @@ services:
     environment:
       HOST_NAME: reverse-proxy
       ZONE: dmz
+      ROLE: bridge
       EXPLOIT_PROB: '0.3'
+      BYPASS_PROB: '0.0'
       NOISE: '3'
       WEAKNESS: none; routing only, but it is the only DMZ host with a path to Corp
-      IS_HONEYPOT: 'false'
-      IS_CROWN_JEWEL: 'false'
+      IS_GATE: 'false'
       LOG_SINK: http://logger:8000/ingest
     networks:
     - net-dmz
@@ -44,11 +64,12 @@ services:
     environment:
       HOST_NAME: web-portal
       ZONE: dmz
+      ROLE: entry
       EXPLOIT_PROB: '0.9'
+      BYPASS_PROB: '0.0'
       NOISE: '2'
       WEAKNESS: weak admin credential
-      IS_HONEYPOT: 'false'
-      IS_CROWN_JEWEL: 'false'
+      IS_GATE: 'false'
       LOG_SINK: http://logger:8000/ingest
     networks:
     - net-dmz
@@ -62,11 +83,12 @@ services:
     environment:
       HOST_NAME: mail
       ZONE: dmz
+      ROLE: normal
       EXPLOIT_PROB: '0.7'
+      BYPASS_PROB: '0.0'
       NOISE: '2'
       WEAKNESS: exposed config endpoint
-      IS_HONEYPOT: 'false'
-      IS_CROWN_JEWEL: 'false'
+      IS_GATE: 'false'
       LOG_SINK: http://logger:8000/ingest
     networks:
     - net-dmz
@@ -80,11 +102,12 @@ services:
     environment:
       HOST_NAME: intranet
       ZONE: corp
+      ROLE: normal
       EXPLOIT_PROB: '0.65'
+      BYPASS_PROB: '0.0'
       NOISE: '2'
       WEAKNESS: trusts DMZ session token
-      IS_HONEYPOT: 'false'
-      IS_CROWN_JEWEL: 'false'
+      IS_GATE: 'false'
       LOG_SINK: http://logger:8000/ingest
     networks:
     - net-corp
@@ -99,11 +122,12 @@ services:
     environment:
       HOST_NAME: fileserver
       ZONE: corp
+      ROLE: normal
       EXPLOIT_PROB: '0.75'
+      BYPASS_PROB: '0.0'
       NOISE: '1'
       WEAKNESS: world-readable share
-      IS_HONEYPOT: 'false'
-      IS_CROWN_JEWEL: 'false'
+      IS_GATE: 'false'
       LOG_SINK: http://logger:8000/ingest
     networks:
     - net-corp
@@ -117,11 +141,12 @@ services:
     environment:
       HOST_NAME: dev-box
       ZONE: corp
+      ROLE: normal
       EXPLOIT_PROB: '0.8'
+      BYPASS_PROB: '0.0'
       NOISE: '1'
       WEAKNESS: credential reused from web-portal
-      IS_HONEYPOT: 'false'
-      IS_CROWN_JEWEL: 'false'
+      IS_GATE: 'false'
       LOG_SINK: http://logger:8000/ingest
     networks:
     - net-corp
@@ -135,11 +160,12 @@ services:
     environment:
       HOST_NAME: ci-runner
       ZONE: corp
+      ROLE: normal
       EXPLOIT_PROB: '0.6'
+      BYPASS_PROB: '0.0'
       NOISE: '3'
       WEAKNESS: over-privileged service account
-      IS_HONEYPOT: 'false'
-      IS_CROWN_JEWEL: 'false'
+      IS_GATE: 'false'
       LOG_SINK: http://logger:8000/ingest
     networks:
     - net-corp
@@ -153,30 +179,52 @@ services:
     environment:
       HOST_NAME: ad-controller
       ZONE: corp
+      ROLE: pivot
       EXPLOIT_PROB: '0.4'
+      BYPASS_PROB: '0.0'
       NOISE: '4'
       WEAKNESS: credential cache; the only host with a path to the secure zone
-      IS_HONEYPOT: 'false'
-      IS_CROWN_JEWEL: 'false'
+      IS_GATE: 'false'
       LOG_SINK: http://logger:8000/ingest
     networks:
     - net-corp
     - net-bridge-corp-secure
     restart: unless-stopped
-  db-primary:
+  auth-server:
     build:
       context: ./services
       dockerfile: Dockerfile
-    container_name: db-primary
-    hostname: db-primary
+    container_name: auth-server
+    hostname: auth-server
     environment:
-      HOST_NAME: db-primary
+      HOST_NAME: auth-server
       ZONE: secure
+      ROLE: crown_jewel
       EXPLOIT_PROB: '0.5'
+      BYPASS_PROB: '0.0'
       NOISE: '5'
-      WEAKNESS: reachable only from ad-controller
-      IS_HONEYPOT: 'false'
-      IS_CROWN_JEWEL: 'true'
+      WEAKNESS: stores the admin login; reachable only via ad-controller
+      IS_GATE: 'false'
+      LOG_SINK: http://logger:8000/ingest
+    networks:
+    - net-secure
+    - net-bridge-corp-secure
+    restart: unless-stopped
+  mfa-service:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+    container_name: mfa-service
+    hostname: mfa-service
+    environment:
+      HOST_NAME: mfa-service
+      ZONE: secure
+      ROLE: mfa_gate
+      EXPLOIT_PROB: '0.0'
+      BYPASS_PROB: '0.45'
+      NOISE: '4'
+      WEAKNESS: approval check on credential change; degradable under load
+      IS_GATE: 'true'
       LOG_SINK: http://logger:8000/ingest
     networks:
     - net-secure
@@ -191,50 +239,53 @@ services:
     environment:
       HOST_NAME: backup
       ZONE: secure
+      ROLE: normal
       EXPLOIT_PROB: '0.55'
+      BYPASS_PROB: '0.0'
       NOISE: '3'
       WEAKNESS: weak backup credential
-      IS_HONEYPOT: 'false'
-      IS_CROWN_JEWEL: 'false'
+      IS_GATE: 'false'
       LOG_SINK: http://logger:8000/ingest
     networks:
     - net-secure
     - net-bridge-corp-secure
     restart: unless-stopped
-  honeypot-corp:
+  honeypot-1:
     build:
       context: ./services
       dockerfile: Dockerfile
-    container_name: honeypot-corp
-    hostname: honeypot-corp
+    container_name: honeypot-1
+    hostname: honeypot-1
     environment:
-      HOST_NAME: honeypot-corp
+      HOST_NAME: honeypot-1
       ZONE: corp
+      ROLE: honeypot
       EXPLOIT_PROB: '0.95'
+      BYPASS_PROB: '0.0'
       NOISE: '5'
       WEAKNESS: decoy; looks valuable, alerts loudly on any touch
-      IS_HONEYPOT: 'true'
-      IS_CROWN_JEWEL: 'false'
+      IS_GATE: 'false'
       LOG_SINK: http://logger:8000/ingest
     networks:
     - net-corp
     restart: unless-stopped
     profiles:
     - honeypot
-  honeypot-secure:
+  honeypot-2:
     build:
       context: ./services
       dockerfile: Dockerfile
-    container_name: honeypot-secure
-    hostname: honeypot-secure
+    container_name: honeypot-2
+    hostname: honeypot-2
     environment:
-      HOST_NAME: honeypot-secure
+      HOST_NAME: honeypot-2
       ZONE: secure
+      ROLE: honeypot
       EXPLOIT_PROB: '0.95'
+      BYPASS_PROB: '0.0'
       NOISE: '5'
       WEAKNESS: decoy; looks valuable, alerts loudly on any touch
-      IS_HONEYPOT: 'true'
-      IS_CROWN_JEWEL: 'false'
+      IS_GATE: 'false'
       LOG_SINK: http://logger:8000/ingest
     networks:
     - net-secure
@@ -250,11 +301,12 @@ services:
     environment:
       HOST_NAME: logger
       ZONE: infra
+      ROLE: log_sink
       EXPLOIT_PROB: '0.0'
+      BYPASS_PROB: '0.0'
       NOISE: '0'
       WEAKNESS: n/a; receives logs from all zones, never a target
-      IS_HONEYPOT: 'false'
-      IS_CROWN_JEWEL: 'false'
+      IS_GATE: 'false'
       LOG_SINK: http://logger:8000/ingest
     networks:
     - net-dmz

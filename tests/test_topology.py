@@ -10,7 +10,7 @@ one we claim to be solving. That is a silent failure, so we test it loudly.
 from __future__ import annotations
 
 from marlsoc.env import topology as topo
-from marlsoc.env.topology import Zone
+from marlsoc.env.topology import Role, Zone
 
 
 def _reachable_closure(start: str, *, blocked: frozenset[str] = frozenset()) -> set[str]:
@@ -39,6 +39,12 @@ class TestForcedPath:
         # If this fails the game is unwinnable for red and no amount of training helps.
         assert topo.CROWN_JEWEL in _reachable_closure(topo.ENTRY_HOST)
 
+    def test_the_waf_fronts_the_dmz_and_nothing_deeper(self) -> None:
+        """Layer 1 guards the DMZ only. If edge-gateway could reach Corp, red could
+        skip Layer 2 entirely and the layer ordering would be a fiction."""
+        for dst in topo.hosts_in(Zone.CORP) + topo.hosts_in(Zone.SECURE):
+            assert not topo.can_reach(topo.WAF_HOST, dst.name)
+
     def test_no_direct_path_from_dmz_to_secure(self) -> None:
         # One hop only: no DMZ host may open a connection straight into the secure zone.
         for src in topo.hosts_in(Zone.DMZ):
@@ -56,14 +62,14 @@ class TestForcedPath:
         asserts rather than assumes.
         """
         without_pivot = _reachable_closure(
-            topo.ENTRY_HOST, blocked=frozenset({"ad-controller"})
+            topo.ENTRY_HOST, blocked=frozenset({topo.PIVOT_HOST})
         )
         assert topo.CROWN_JEWEL not in without_pivot
         assert "backup" not in without_pivot
 
     def test_reverse_proxy_is_the_only_bridge_into_corp(self) -> None:
         without_bridge = _reachable_closure(
-            topo.ENTRY_HOST, blocked=frozenset({"reverse-proxy"})
+            topo.ENTRY_HOST, blocked=frozenset({topo.BRIDGE_HOST})
         )
         for host in topo.hosts_in(Zone.CORP):
             assert host.name not in without_bridge
@@ -103,12 +109,43 @@ class TestHostDefinitions:
         assert sum(h.is_entry for h in topo.HOSTS) == 1
         assert sum(h.is_crown_jewel for h in topo.HOSTS) == 1
 
-    def test_thirteen_hosts(self) -> None:
-        assert len(topo.HOSTS) == 13
+    def test_fifteen_hosts(self) -> None:
+        # PROJECT.md section 3 says "~14 containers"; the table in 3.3 lists 15 once
+        # honeypot-1/2 are counted separately.
+        assert len(topo.HOSTS) == 15
+
+    def test_every_layer_anchor_role_is_unique(self) -> None:
+        """Each of the six layers hangs off exactly one host. Two pivots would mean two
+        ways into the secure zone and no chokepoint to defend."""
+        for role in (Role.WAF, Role.ENTRY, Role.BRIDGE, Role.PIVOT,
+                     Role.CROWN_JEWEL, Role.MFA_GATE, Role.LOG_SINK):
+            assert topo.host_with_role(role) is not None
 
     def test_exploit_probabilities_are_valid(self) -> None:
         for host in topo.HOSTS:
             assert 0.0 <= host.exploit_prob <= 1.0, host.name
+            assert 0.0 <= host.bypass_prob <= 1.0, host.name
+
+    def test_gates_cannot_be_owned_and_targets_cannot_be_bypassed(self) -> None:
+        """The core of the six-layer design (topology docstring, "gates, not targets").
+
+        If the WAF or the MFA service had a nonzero exploit_prob, red's cheapest policy
+        would be to compromise them like any other host, and the claim that each layer
+        needs a *different class* of action -- PROJECT.md section 3.1, the whole reason
+        this is not just a long corridor -- would be false.
+        """
+        for host in topo.HOSTS:
+            if host.is_gate:
+                assert host.exploit_prob == 0.0, f"{host.name} is a gate but ownable"
+                assert host.bypass_prob > 0.0, f"{host.name} is a gate with no way past"
+            else:
+                assert host.bypass_prob == 0.0, f"{host.name} is not a gate"
+
+    def test_zone_depth_orders_the_path(self) -> None:
+        # Red's state tracks deepest_zone_reached, so the ordering must be monotone
+        # along the intended path.
+        assert (topo.ZONE_DEPTH[Zone.EDGE] < topo.ZONE_DEPTH[Zone.DMZ]
+                < topo.ZONE_DEPTH[Zone.CORP] < topo.ZONE_DEPTH[Zone.SECURE])
 
     def test_entry_is_easy_and_pivot_is_hard(self) -> None:
         """The difficulty gradient from PROJECT.md section 3.3.
@@ -132,16 +169,25 @@ class TestBudgets:
     """CLAUDE.md section 2: at most ~10,000 states per agent, enforced not promised."""
 
     def test_every_defender_is_within_the_state_budget(self) -> None:
-        for zone in topo.DEFENDED_ZONES:
-            size = topo.state_space_size(zone)
-            assert size <= 10_000, f"{zone.value} needs {size} states, over budget"
+        for agent in topo.DEFENDER_ZONES:
+            size = topo.state_space_size(agent)
+            assert size <= 10_000, f"{agent} needs {size} states, over budget"
 
     def test_corp_matches_the_worked_example_in_the_spec(self) -> None:
-        # PROJECT.md section 5 derives 4**5 * 3 = 3072 for the Corp defender.
-        assert topo.state_space_size(Zone.CORP) == 3072
+        # PROJECT.md section 5.1 derives 4**5 * 3 = 3072 states and 13 actions for B_corp.
+        assert topo.state_space_size("B_corp") == 3072
+        assert topo.action_space_size("B_corp") == 13
 
-    def test_action_spaces_differ_per_zone(self) -> None:
-        # CLAUDE.md amendment 3.5 -- the spec's flat "12 actions" is wrong for DMZ/Secure.
-        assert topo.action_space_size(Zone.CORP) == 12
-        assert topo.action_space_size(Zone.DMZ) == 8
-        assert len({topo.action_space_size(z) for z in topo.DEFENDED_ZONES}) > 1
+    def test_action_spaces_differ_per_agent(self) -> None:
+        # CLAUDE.md amendment 3.5 -- the spec's flat "12 actions" assumed equal zones.
+        assert topo.action_space_size("B_dmz") == 11
+        assert topo.action_space_size("B_secure") == 9
+        assert len({topo.action_space_size(a) for a in topo.DEFENDER_ZONES}) > 1
+
+    def test_every_defended_host_belongs_to_exactly_one_defender(self) -> None:
+        """No host may be defended twice or not at all -- overlapping responsibility
+        would let two agents both isolate the same host and both claim the reward."""
+        owned = [h.name for a in topo.DEFENDER_ZONES for h in topo.defended_hosts(a)]
+        assert len(owned) == len(set(owned))
+        expected = {h.name for h in topo.HOSTS if h.defended and h.zone is not Zone.INFRA}
+        assert set(owned) == expected

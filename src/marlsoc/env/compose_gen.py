@@ -26,16 +26,32 @@ a shared network that every host also joined would create a flat any-to-any path
 the log sink -- a real and commonly-missed misconfiguration. Multi-homing the sink keeps
 each zone's log path inside that zone.
 
+Why the Edge zone has no network of its own
+-------------------------------------------
+``edge-gateway`` is the only host in Zone.EDGE, and a one-member Docker network connects
+nothing. More importantly, **Layer 1 is not a network boundary.** PROJECT.md section 3.1
+enforces it with rate limiting and IP reputation *inside* the gateway -- an application
+control, not a segmentation control. So the gateway simply joins ``net-dmz``, fronting
+the three DMZ services, and Layer 1 lives in its nginx config rather than in the network
+graph. This is the cleanest illustration of section 3.1's thesis: the six layers are
+heterogeneous, so they are not all expressible in the same mechanism. Layers 2 and 4 are
+Docker networks; Layers 1 and 6 are host configuration; Layers 3 and 5 are our own token
+and privilege checks.
+
 Known sim-to-real gaps (write these up; they are findings, not bugs)
 -------------------------------------------------------------------
 1. **Direction.** ``topology.CROSS_ZONE_EDGES`` is directed; Docker networks are not.
-   ``db-primary`` can technically open a connection back to ``ad-controller`` in the
+   ``auth-server`` can technically open a connection back to ``ad-controller`` in the
    lab but not in the twin. Benign here because the attacker only moves forward, but it
    is a genuine difference and belongs in the results section.
 2. **Probabilities.** The twin's ``exploit_prob`` is a coin flip. In the lab the same
    action is an HTTP request to our own Flask route, which either works or does not.
-   Phase 4 reproduces the probability by having the service fail deliberately at rate
+   Phase 6 reproduces the probability by having the service fail deliberately at rate
    ``1 - p_h``, so the two remain comparable.
+3. **Gate hosts.** ``edge-gateway`` and ``mfa-service`` have ``exploit_prob = 0.0`` in
+   the twin, so red can never own them. In the lab they are ordinary containers running
+   ordinary Flask, with no compromise endpoint exposed -- the impossibility is enforced
+   by there being no such route rather than by a probability of zero.
 """
 
 from __future__ import annotations
@@ -54,11 +70,14 @@ ZONE_NETWORK = {
     Zone.SECURE: "net-secure",
 }
 
+# Zone.EDGE has no network of its own; see the docstring. Its single host fronts the DMZ.
+EDGE_ATTACHES_TO = ZONE_NETWORK[Zone.DMZ]
+
 # One private network per cross-zone hole, named for the edge it implements. Keeping
 # these separate from the zone networks is what makes the hole one host wide.
 BRIDGE_NETWORKS: dict[str, tuple[str, ...]] = {
     "net-bridge-dmz-corp": ("reverse-proxy", "intranet"),
-    "net-bridge-corp-secure": ("ad-controller", "db-primary", "backup"),
+    "net-bridge-corp-secure": ("ad-controller", "auth-server", "mfa-service", "backup"),
 }
 
 
@@ -70,7 +89,9 @@ def networks_for(host: Host) -> list[str]:
         # Multi-homed into every zone so logs never need a flat shared network.
         return list(ZONE_NETWORK.values())
 
-    if host.zone in ZONE_NETWORK:
+    if host.zone is Zone.EDGE:
+        nets.append(EDGE_ATTACHES_TO)
+    elif host.zone in ZONE_NETWORK:
         nets.append(ZONE_NETWORK[host.zone])
 
     for bridge, members in BRIDGE_NETWORKS.items():
@@ -84,7 +105,7 @@ def service_for(host: Host) -> dict[str, Any]:
     """One compose service definition for a host.
 
     Every service is the same tiny Flask image parameterised by environment variables.
-    Thirteen near-identical containers is the point: the interesting variation is in the
+    Fifteen near-identical containers is the point: the interesting variation is in the
     topology and the agents, not in the services.
     """
     service: dict[str, Any] = {
@@ -94,11 +115,12 @@ def service_for(host: Host) -> dict[str, Any]:
         "environment": {
             "HOST_NAME": host.name,
             "ZONE": host.zone.value,
+            "ROLE": host.role.value,
             "EXPLOIT_PROB": str(host.exploit_prob),
+            "BYPASS_PROB": str(host.bypass_prob),
             "NOISE": str(host.noise),
             "WEAKNESS": host.weakness,
-            "IS_HONEYPOT": str(host.is_honeypot_slot).lower(),
-            "IS_CROWN_JEWEL": str(host.is_crown_jewel).lower(),
+            "IS_GATE": str(host.is_gate).lower(),
             "LOG_SINK": f"http://{topo.LOG_SINK}:8000/ingest",
         },
         "networks": networks_for(host),
