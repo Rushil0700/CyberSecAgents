@@ -227,7 +227,7 @@ class TestEvaluationDoesNotTrain:
         Learning is disabled globally rather than per agent, so an evaluation cannot
         train the thing it is measuring even if a switch is set wrong."""
         scenario = phase2()
-        controllers, _ = train(scenario, 60, verbose=False)
+        controllers, _, _ = train(scenario, 60, verbose=False, eval_every=0)
         before = controllers["B_dmz"].learner.q.copy()
         evaluate(scenario, controllers, episodes=30)
         assert np.array_equal(before, controllers["B_dmz"].learner.q)
@@ -235,7 +235,7 @@ class TestEvaluationDoesNotTrain:
     def test_evaluate_restores_exploration_afterwards(self) -> None:
         # Otherwise training resumed after an evaluation would be silently greedy.
         scenario = phase2()
-        controllers, _ = train(scenario, 30, verbose=False)
+        controllers, _, _ = train(scenario, 30, verbose=False, eval_every=0)
         evaluate(scenario, controllers, episodes=10)
         assert not controllers["B_dmz"].greedy
 

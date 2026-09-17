@@ -21,6 +21,21 @@ Q-Learning and Expected SARSA ignore ``a'``, so one loop covers all three. Writi
 simpler off-policy loop first and bolting SARSA on later is how the two quietly end up
 using different transition sequences and the section 7.2 comparison becomes meaningless.
 
+Design note -- **the training curve and the policy-quality curve are different curves.**
+The obvious learning curve plots the return collected *while training*. For this project
+that curve is misleading, and measurably so. Eight of ``B_dmz``'s eleven actions are
+``block`` or ``isolate``, so even at epsilon = 0.05 the agent takes roughly a dozen
+expensive random containments per 250-step episode. Measured over 3,000 episodes, online
+return got *worse* (-365 to -622) while the greedy policy it had learned was far better
+(-159): the decline was the price of exploring, not a policy getting worse.
+
+So ``train`` takes periodic **evaluation snapshots** -- a short greedy, non-learning run
+every ``eval_every`` episodes -- and those are what the learning curve plots. The online
+series is still recorded, because the gap between the two *is* the cost of exploration
+and is worth a paragraph in the report. This is the defender's version of the
+cliff-walking problem in section 7.2: an agent punished for exploring looks worse online
+than it actually is.
+
 Design note -- **rewards are accumulated undiscounted for reporting.**
 The learner discounts by ``gamma`` internally, but the number plotted is the plain sum of
 rewards over the episode. Discounted returns are not comparable across episodes of
@@ -30,8 +45,7 @@ different lengths, and every curve in section 9 compares across exactly that.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Protocol
+from typing import NamedTuple, Protocol
 
 import numpy as np
 
@@ -274,6 +288,21 @@ def run_episode(
 # --------------------------------------------------------------------------------------
 # Training
 # --------------------------------------------------------------------------------------
+class TrainingRun(NamedTuple):
+    """Everything a run produces.
+
+    Attributes:
+        controllers: The trained agents.
+        log: Per-episode online metrics -- what was collected *while exploring*.
+        evals: Periodic greedy snapshots. **This is the learning curve.** See the design
+            note on why the two differ.
+    """
+
+    controllers: dict[str, Controller]
+    log: MetricsLog
+    evals: MetricsLog
+
+
 def train(
     scenario: ScenarioConfig,
     episodes: int,
@@ -282,12 +311,19 @@ def train(
     phase: str = "phase2",
     learner_name: str = "B_corp",
     report_every: int = 500,
+    eval_every: int = 250,
+    eval_episodes: int = 60,
     verbose: bool = True,
-) -> tuple[dict[str, Controller], MetricsLog]:
-    """Run ``episodes`` episodes and return the controllers and the metrics log.
+) -> TrainingRun:
+    """Run ``episodes`` episodes and return the controllers and both metric series.
 
     Each episode gets its own seed, derived from the scenario seed, so a run is
     reproducible end to end while no two episodes are identical.
+
+    Args:
+        eval_every: Episodes between greedy evaluation snapshots. Zero disables them.
+        eval_episodes: Episodes per snapshot. Small, because this runs many times; the
+            noise it adds is averaged out by the curve rather than by each point.
     """
     rng = np.random.default_rng(scenario.seed)
     env = MiniCorp(scenario)
@@ -297,6 +333,7 @@ def train(
     }
 
     log = MetricsLog()
+    evals = MetricsLog()
     for episode in range(episodes):
         record, _ = run_episode(
             env, controllers, scenario, seed=scenario.seed * 1_000_003 + episode
@@ -305,10 +342,29 @@ def train(
             EpisodeRecord(**{**record.__dict__, "episode": episode,
                              "phase": phase, "learner": learner_name})
         )
+
+        if eval_every and (episode + 1) % eval_every == 0:
+            snapshot = evaluate(scenario, controllers, eval_episodes, phase="snapshot")
+            # One row per snapshot, holding that snapshot's means. The curve is then a
+            # series of measurements of the policy rather than of the exploration.
+            evals.append(EpisodeRecord(
+                episode=episode, phase=phase, learner=learner_name,
+                red_return=snapshot.mean("red_return"),
+                blue_return=snapshot.mean("blue_return"),
+                outcome=f"red_win_rate={snapshot.rate('red_win'):.4f}",
+                steps=round(snapshot.mean("steps")),
+                hosts_compromised=round(snapshot.mean("hosts_compromised")),
+                layers_breached=round(snapshot.mean("layers_breached")),
+                mttd=None, mttc=None,
+                false_positives=round(snapshot.mean("false_positives")),
+                honeypot_hits=round(snapshot.mean("honeypot_hits")),
+                epsilon=record.epsilon,
+            ))
+
         if verbose and report_every and (episode + 1) % report_every == 0:
             print(log.summary(report_every))
 
-    return controllers, log
+    return TrainingRun(controllers, log, evals)
 
 
 def evaluate(
