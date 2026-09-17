@@ -117,13 +117,19 @@ further inside budget.
 
 | Agent | States | Actions |
 |---|---|---|
-| `B_dmz` | 768 | 11 |
+| `B_dmz` | 768 | 10 |
 | `B_corp` | 3,072 | 13 |
 | `B_secure` | 192 | 9 |
-| `R_breach` | 384 | 40 |
+| `R_breach` | 384 | 29 |
 | `R_scout` | 96 | 9 |
 
 Budget is 10,000. Every agent is inside it, and the test suite enforces it.
+
+> **Updated in Phase 2.** These action-space sizes started at 11 and 40. Eleven actions
+> turned out to be *unsatisfiable* — legal in no reachable state — and were removed. See
+> `notes/phase2-first-curve.md`; the short version is that an action which is never legal
+> is never updated, so it keeps its optimistic 0.0 initialisation forever and silently
+> dominates any unmasked reading of the table.
 
 ### 7. Two bugs the unit tests could never have found
 

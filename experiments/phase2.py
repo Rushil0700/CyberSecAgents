@@ -24,6 +24,22 @@ agent, one zone, a fixed opponent, and a stationary MDP.
 
 The baselines it is measured against are section 9's, and none of them is separate code
 -- each is a different setting of CLAUDE.md 3.7's three switches.
+
+Why this reports a mean over seeds
+----------------------------------
+A single run is not evidence here, and that was established the hard way. With epsilon
+decaying over 70% of training, two runs of the *same* configuration scored 6.2% and 76.5%
+attacker success. The reason is visible in the evaluation snapshots: the policy is
+unstable for as long as epsilon keeps moving, and whether it happens to have converged
+when training stops is close to luck.
+
+The instability is not mysterious. Blue's own policy determines the state distribution it
+experiences -- isolating a DMZ host *ends the episode*, so a containment-happy defender
+only ever sees early-episode states while a passive one sees deep ones. On top of that,
+most of blue's return comes from the -10 per step bleed on Corp and Secure hosts that
+``B_dmz`` has no action to touch, which is uncontrollable variance in every TD target. So
+this script runs several seeds and reports the mean and spread. Quoting the best seed
+would be exactly the dishonesty CLAUDE.md 3.7 warns about.
 """
 
 from __future__ import annotations
@@ -104,20 +120,39 @@ def main() -> None:
     parser.add_argument("--quick", action="store_true", help="short smoke run")
     parser.add_argument("--episodes", type=int, default=None)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--seeds", type=int, default=1,
+                        help="repeat over this many seeds and report mean +- sd")
+    parser.add_argument("--decay", type=float, default=0.35,
+                        help="fraction of training over which epsilon decays")
     args = parser.parse_args()
 
     episodes = args.episodes or (800 if args.quick else 6_000)
     eval_n = 100 if args.quick else 400
 
     print(f"Phase 2 -- {LEARNER} (Q-Learning) vs scripted attacker, all six layers")
-    print(f"{episodes} episodes, seed {args.seed}\n")
+    print(f"{episodes} episodes, epsilon decays over {args.decay:.0%} of training, "
+          f"{args.seeds} seed(s) from {args.seed}\n")
 
-    learner_cfg = LearnerConfig(
-        algorithm=Algorithm.Q_LEARNING,
-        alpha=0.1, gamma=0.95,
-        epsilon_start=1.0, epsilon_end=0.05,
-        epsilon_decay_episodes=int(episodes * 0.7),
-    )
+    def learner_config() -> LearnerConfig:
+        return LearnerConfig(
+            algorithm=Algorithm.Q_LEARNING,
+            alpha=0.1, gamma=0.95,
+            epsilon_start=1.0, epsilon_end=0.05,
+            epsilon_decay_episodes=max(1, int(episodes * args.decay)),
+        )
+
+    # Extra seeds, reported as a spread. See the module docstring on why one run is not
+    # evidence for this configuration.
+    repeats: list[float] = []
+    for extra in range(1, args.seeds):
+        sc_extra = scenario(AgentConfig(), seed=args.seed + extra)
+        run_extra = train(sc_extra, episodes, learner_config(), verbose=False,
+                          eval_every=0)
+        rate = evaluate(sc_extra, run_extra.controllers, eval_n).rate("red_win")
+        repeats.append(rate)
+        print(f"  seed {args.seed + extra}: attacker success {rate:.1%}")
+
+    learner_cfg = learner_config()
     sc = scenario(AgentConfig(), seed=args.seed)
     run = train(
         sc, episodes, learner_cfg,
@@ -144,12 +179,22 @@ def main() -> None:
     coverage = run.controllers[LEARNER].learner.coverage
     print(f"\nstate-space coverage: {coverage:.1%}")
 
+    if repeats:
+        import statistics
+        all_rates = [final.rate("red_win"), *repeats]
+        print(f"attacker success across {len(all_rates)} seeds: "
+              f"mean {statistics.fmean(all_rates):.1%}, "
+              f"sd {statistics.pstdev(all_rates):.1%}, "
+              f"range {min(all_rates):.1%}-{max(all_rates):.1%}")
+
     OUT.mkdir(parents=True, exist_ok=True)
     run.log.to_csv(OUT / "episodes.csv")
     run.evals.to_csv(OUT / "eval_snapshots.csv")
     final.to_csv(OUT / "final_eval.csv")
     (OUT / "summary.json").write_text(json.dumps(
-        {"episodes": episodes, "seed": args.seed, "coverage": round(coverage, 4),
+        {"episodes": episodes, "seed": args.seed, "seeds": args.seeds,
+         "epsilon_decay_fraction": args.decay, "coverage": round(coverage, 4),
+         "attacker_success_per_seed": [round(final.rate("red_win"), 4), *[round(r, 4) for r in repeats]],
          "results": rows}, indent=2))
     run.controllers[LEARNER].learner.save(OUT / f"{LEARNER}_qtable.npz")
 
