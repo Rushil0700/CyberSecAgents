@@ -128,9 +128,17 @@ class MiniCorp:
                for a in topo.DEFENDER_ZONES},
         }
 
-    def legal_masks(self) -> dict[str, np.ndarray]:
-        """The legality mask for every agent, for epsilon-greedy to sample within."""
-        return {a: act.legal_mask(self.state, a) for a in act.ACTION_SPACES}
+    def legal_masks(self, agents: tuple[str, ...] | None = None) -> dict[str, np.ndarray]:
+        """The legality mask per agent, for epsilon-greedy to sample within.
+
+        Args:
+            agents: Restrict to these agents. Building a mask means evaluating every
+                precondition for every action, which profiling showed to be half the
+                twin's runtime -- so a disabled agent, which ignores its mask entirely,
+                should not have one computed.
+        """
+        names = agents if agents is not None else tuple(act.ACTION_SPACES)
+        return {a: act.legal_mask(self.state, a) for a in names}
 
     # ----------------------------------------------------------------------------------
     # The transition function

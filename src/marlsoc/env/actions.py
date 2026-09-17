@@ -201,6 +201,17 @@ ACTION_SPACES: Final[dict[str, tuple[Action, ...]]] = {
     **{agent: blue_actions(agent) for agent in topo.DEFENDER_ZONES},
 }
 
+# Action -> column index, per agent. Built once, because the obvious alternatives are
+# both linear scans over a tuple of dataclasses: ``action in ACTION_SPACES[agent]`` and
+# ``tuple.index(action)``. Called once per action per mask, that is quadratic in the
+# action-space size on every single step -- 1,600 dataclass comparisons per step for
+# R_breach alone, and measurably the twin's bottleneck. Section 8 budgets ~10,000
+# episodes a minute; this is part of paying for it.
+ACTION_INDEX: Final[dict[str, dict[Action, int]]] = {
+    agent: {action: i for i, action in enumerate(space)}
+    for agent, space in ACTION_SPACES.items()
+}
+
 
 # --------------------------------------------------------------------------------------
 # Legality
@@ -230,7 +241,7 @@ def is_legal(state: EpisodeState, agent: str, action: Action) -> bool:
             agent's action list -- and it must fail loudly, because the alternative is a
             defender confidently taking a move it does not possess.
     """
-    if action not in ACTION_SPACES[agent]:
+    if action not in ACTION_INDEX[agent]:
         raise ValueError(f"{action} is not in {agent}'s action space")
 
     verb = action.verb
@@ -374,4 +385,4 @@ def legal_actions(state: EpisodeState, agent: str) -> tuple[Action, ...]:
 
 def action_index(agent: str, action: Action) -> int:
     """Position of ``action`` in its agent's action tuple -- the Q-table column."""
-    return ACTION_SPACES[agent].index(action)
+    return ACTION_INDEX[agent][action]
