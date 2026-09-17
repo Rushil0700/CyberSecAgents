@@ -180,7 +180,7 @@ class TestBudgets:
 
     def test_action_spaces_differ_per_agent(self) -> None:
         # CLAUDE.md amendment 3.5 -- the spec's flat "12 actions" assumed equal zones.
-        assert topo.action_space_size("B_dmz") == 11
+        assert topo.action_space_size("B_dmz") == 10
         assert topo.action_space_size("B_secure") == 9
         assert len({topo.action_space_size(a) for a in topo.DEFENDER_ZONES}) > 1
 

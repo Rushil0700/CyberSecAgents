@@ -209,9 +209,10 @@ class TestRedTransitions:
         """
         env = MiniCorp()
         env.reset()
-        move = Action(Verb.EXPLOIT, host=topo.PIVOT_HOST)
-        assert move in act.ACTION_SPACES["R_breach"]
-        assert not act.is_legal(env.state, "R_breach", move)
+        # The pivot is no longer offered as an exploit target at all -- an action that
+        # can never be legal does not belong in the action space.
+        assert topo.PIVOT_HOST not in act.EXPLOIT_TARGETS
+        assert topo.PIVOT_HOST in act.LATERAL_TARGETS
 
     def test_a_failed_exploit_still_makes_noise(self) -> None:
         # Otherwise red could probe freely and stealth would cost nothing.

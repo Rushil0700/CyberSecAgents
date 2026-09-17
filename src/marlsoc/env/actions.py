@@ -128,6 +128,44 @@ ATTACKABLE: Final[tuple[str, ...]] = tuple(
     if not h.is_gate and h.role is not Role.LOG_SINK
 )
 
+# Each targeted verb gets its own target list rather than reusing ATTACKABLE, because a
+# blanket list produces actions that can never be legal in any reachable state. Those are
+# not harmless: an action that is never legal is never taken, so it is never updated, so
+# it keeps its optimistic 0.0 initialisation forever, and it costs a column in every
+# Q-table. This was found by decoding a trained table -- the "best" action in most states
+# had Q exactly 0.00 beside a spread of 120, because it was one the agent had never been
+# allowed to try.
+#
+# exploit widens within a held zone, and is barred from the pivot (Layer 4 guards it), so
+# the pivot can never be an exploit target.
+EXPLOIT_TARGETS: Final[tuple[str, ...]] = tuple(
+    name for name in ATTACKABLE if topo.BY_NAME[name].role is not Role.PIVOT
+)
+
+# lateral_move advances into a strictly deeper zone, or onto the pivot. That makes the
+# valid targets exactly the **destinations of cross-zone edges**, plus the pivot -- not
+# every deep host. ``fileserver`` is in Corp but is reachable only from inside Corp, so
+# red must already hold a Corp foothold to touch it, and at that point nothing in Corp is
+# "deeper" than what it holds: the action could never be legal. The single DMZ-to-Corp
+# edge is ``reverse-proxy -> intranet``, which is why ``intranet`` qualifies and the rest
+# of the corporate zone does not. Both honeypots are likewise reachable only from within
+# their own zone.
+LATERAL_TARGETS: Final[tuple[str, ...]] = tuple(
+    name for name in ATTACKABLE
+    if name == topo.PIVOT_HOST
+    or any(
+        dst == name and topo.ZONE_DEPTH[topo.BY_NAME[dst].zone] > topo.ZONE_DEPTH[Zone.DMZ]
+        for _, dst in topo.CROSS_ZONE_EDGES
+    )
+)
+
+# Credentials are read from a host red already **holds**, and red can never hold a
+# honeypot: touching one is recorded as an engagement and returns without compromising
+# anything. So a honeypot can never be a steal target.
+STEAL_TARGETS: Final[tuple[str, ...]] = tuple(
+    name for name in ATTACKABLE if not topo.BY_NAME[name].is_honeypot_slot
+)
+
 RECON_ZONES: Final[tuple[Zone, ...]] = (Zone.EDGE, Zone.DMZ, Zone.CORP, Zone.SECURE)
 
 # The layer each blue reinforcement action restores (section 5.3, "+25 restoring a
@@ -148,18 +186,38 @@ _AGENT_REINFORCE: Final[dict[str, Verb]] = {
 # --------------------------------------------------------------------------------------
 # Action space construction
 # --------------------------------------------------------------------------------------
+def _honeypot_slots(agent: str) -> tuple[topo.Host, ...]:
+    """Honeypot slots inside an agent's zones. B_dmz has none -- honeypots live in Corp
+    and Secure, where there is something worth faking."""
+    return tuple(
+        h for zone in topo.DEFENDER_ZONES[agent]
+        for h in topo.hosts_in(zone)
+        if h.is_honeypot_slot
+    )
+
+
 def blue_actions(agent: str) -> tuple[Action, ...]:
     """``A_i`` for a defender: block and isolate each defended host, reinforce its own
-    layer, deploy a honeypot, or do nothing.
+    layer, deploy a honeypot where there is a slot for one, or do nothing.
 
-    Size is ``2n + 3``: 11 for B_dmz, 13 for B_corp, 9 for B_secure -- different per
-    agent, per CLAUDE.md amendment 3.5.
+    Size is ``2n + 2``, plus one if the agent's zones contain a honeypot slot: 10 for
+    B_dmz, 13 for B_corp, 9 for B_secure -- different per agent, per CLAUDE.md
+    amendment 3.5.
+
+    ``deploy_honeypot`` is omitted for ``B_dmz`` because PROJECT.md section 3.3 places
+    both honeypots in Corp and Secure, so the Edge and DMZ zones have no slot to deploy
+    into and the action could never be legal. This was found by decoding a trained
+    Q-table: a permanently illegal action is never taken, so it is never updated, so it
+    keeps its optimistic 0.0 initialisation forever and dominates any unmasked argmax
+    over the row. It costs a column in the table and makes the action-space size a
+    misstatement. An action that can never be legal does not belong in the space.
     """
     hosts = topo.defended_hosts(agent)
     actions = [Action(Verb.BLOCK, host=h.name) for h in hosts]
     actions += [Action(Verb.ISOLATE, host=h.name) for h in hosts]
     actions.append(Action(_AGENT_REINFORCE[agent]))
-    actions.append(Action(Verb.DEPLOY_HONEYPOT))
+    if _honeypot_slots(agent):
+        actions.append(Action(Verb.DEPLOY_HONEYPOT))
     actions.append(Action(Verb.NOOP))
     return tuple(actions)
 
@@ -182,12 +240,21 @@ def red_breach_actions() -> tuple[Action, ...]:
     """``A_i`` for ``R_breach``: the targeted verbs over every attackable host, plus the
     three untargeted layer moves, the win, and wait.
 
-    Size is ``3 * |attackable| + 4`` = 40. Larger than any blue action set, which is
-    correct: the attacker has the initiative and therefore the wider choice.
+    Size is 29 -- eleven exploit targets, four lateral-move targets, ten
+    steal-credentials targets and four untargeted actions. It started at 40; the eleven
+    removed were all provably unsatisfiable, and a test constructs states directly to
+    keep it that way. Larger than any blue action
+    set, which is correct: the attacker has the initiative and therefore the wider
+    choice. Each verb uses its own target list so that no column of the Q-table holds an
+    action that can never be legal; see the target-list comments above.
     """
     actions: list[Action] = []
-    for verb in (Verb.EXPLOIT, Verb.LATERAL_MOVE, Verb.STEAL_CREDENTIALS):
-        actions += [Action(verb, host=h) for h in ATTACKABLE]
+    for verb, targets in (
+        (Verb.EXPLOIT, EXPLOIT_TARGETS),
+        (Verb.LATERAL_MOVE, LATERAL_TARGETS),
+        (Verb.STEAL_CREDENTIALS, STEAL_TARGETS),
+    ):
+        actions += [Action(verb, host=h) for h in targets]
     actions.append(Action(Verb.ESCALATE_PRIVILEGE))
     actions.append(Action(Verb.DEGRADE_MFA))
     actions.append(Action(Verb.ALTER_CREDENTIALS))
@@ -343,16 +410,6 @@ def is_legal(state: EpisodeState, agent: str, action: Action) -> bool:
                    for h in _honeypot_slots(agent))
 
     raise ValueError(f"unhandled verb {verb}")
-
-
-def _honeypot_slots(agent: str) -> tuple[topo.Host, ...]:
-    """Honeypot slots inside an agent's zones. B_dmz has none -- honeypots live in Corp
-    and Secure, where there is something worth faking."""
-    return tuple(
-        h for zone in topo.DEFENDER_ZONES[agent]
-        for h in topo.hosts_in(zone)
-        if h.is_honeypot_slot
-    )
 
 
 def legal_mask(state: EpisodeState, agent: str) -> np.ndarray:

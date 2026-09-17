@@ -363,9 +363,16 @@ def state_space_size(agent: str, *, n_statuses: int = 4, n_alert_levels: int = 3
 # Each blue agent gets one layer-reinforcing action for the layers it holds
 # (PROJECT.md section 4.2): tighten_ratelimit, rotate_credentials, harden_mfa.
 def action_space_size(agent: str) -> int:
-    """Size of a defender's action set: ``block(h) + isolate(h) + reinforce + honeypot + noop``.
+    """Size of a defender's action set: ``block(h) + isolate(h) + reinforce + noop``,
+    plus ``deploy_honeypot`` where the agent's zones actually contain a honeypot slot.
 
-    Note this differs per agent (11 / 13 / 9), which is CLAUDE.md amendment 3.5 -- the
-    spec's flat "12 actions" assumed every zone had the same number of hosts.
+    Note this differs per agent (10 / 13 / 9), which is CLAUDE.md amendment 3.5 -- the
+    spec's flat "12 actions" assumed every zone had the same number of hosts. B_dmz is
+    also the one agent with no honeypot slot to deploy into; see ``actions.blue_actions``.
     """
-    return 2 * len(defended_hosts(agent)) + 3
+    has_slot = any(
+        h.is_honeypot_slot
+        for zone in DEFENDER_ZONES[agent]
+        for h in hosts_in(zone)
+    )
+    return 2 * len(defended_hosts(agent)) + 2 + int(has_slot)

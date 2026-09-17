@@ -51,8 +51,8 @@ class TestActionSpaces:
         # CLAUDE.md amendment 3.5. An agent indexing another agent's action list is a
         # silent mis-mapping producing a confident, wrong policy.
         sizes = {a: len(s) for a, s in act.ACTION_SPACES.items()}
-        assert sizes == {"R_scout": 9, "R_breach": 40,
-                         "B_dmz": 11, "B_corp": 13, "B_secure": 9}
+        assert sizes == {"R_scout": 9, "R_breach": 29,
+                         "B_dmz": 10, "B_corp": 13, "B_secure": 9}
 
     def test_blue_sizes_match_the_topology_formula(self) -> None:
         for agent in topo.DEFENDER_ZONES:
@@ -82,6 +82,29 @@ class TestActionSpaces:
         assert topo.MFA_HOST not in act.ATTACKABLE
         assert topo.LOG_SINK not in act.ATTACKABLE
         assert topo.CROWN_JEWEL in act.ATTACKABLE
+
+    def test_each_verb_has_its_own_target_list(self) -> None:
+        """A blanket target list produces actions that can never be legal anywhere.
+        The pivot is never an exploit target (Layer 4 guards it), and no DMZ host is ever
+        a lateral-move target, because red's first foothold is always in the DMZ so no
+        DMZ host is ever deeper than what it already holds."""
+        assert topo.PIVOT_HOST not in act.EXPLOIT_TARGETS
+        assert topo.PIVOT_HOST in act.LATERAL_TARGETS
+        for host in topo.hosts_in(Zone.DMZ):
+            assert host.name not in act.LATERAL_TARGETS
+            assert host.name in act.EXPLOIT_TARGETS
+
+        # Only cross-zone-edge destinations qualify for lateral_move. fileserver is deep
+        # but reachable only from inside Corp, so red must already hold Corp to touch it
+        # and nothing in Corp is then "deeper" than what it holds.
+        assert "fileserver" not in act.LATERAL_TARGETS
+        assert "intranet" in act.LATERAL_TARGETS
+
+        # Red can never hold a honeypot -- touching one is an engagement, not a
+        # compromise -- so it can never steal credentials from one.
+        for slot in ("honeypot-1", "honeypot-2"):
+            assert slot not in act.STEAL_TARGETS
+            assert slot in act.EXPLOIT_TARGETS
 
     def test_the_scout_chooses_zones_because_its_state_only_tracks_zones(self) -> None:
         """An action space finer than the state space is capacity the Q-table can never
@@ -131,9 +154,10 @@ class TestRedMasking:
         lateral_move crosses into a deeper one."""
         state = into_dmz()
         state.discovered.update(h.name for h in topo.hosts_in(Zone.CORP))
-        # Same zone -> exploit yes, lateral_move no.
+        # Same zone -> exploit. lateral_move onto a DMZ host is not merely illegal, it
+        # is not in the action space at all, which is the stronger guarantee.
         assert act.is_legal(state, "R_breach", Action(Verb.EXPLOIT, host="mail"))
-        assert not act.is_legal(state, "R_breach", Action(Verb.LATERAL_MOVE, host="mail"))
+        assert "mail" not in act.LATERAL_TARGETS
         # Deeper zone -> lateral_move is the verb, but Layer 3 is still standing.
         assert not act.is_legal(state, "R_breach", Action(Verb.EXPLOIT, host="intranet"))
         assert not act.is_legal(state, "R_breach",
@@ -240,6 +264,70 @@ class TestBlueMasking:
         state = at_the_pivot()
         assert Action(Verb.ROTATE_CREDENTIALS) not in act.ACTION_SPACES["B_secure"]
         assert Action(Verb.HARDEN_MFA) not in act.ACTION_SPACES["B_corp"]
+
+    def test_b_dmz_has_no_honeypot_action_because_it_has_no_slot(self) -> None:
+        """Both honeypots live in Corp and Secure (section 3.3), so the action could
+        never be legal for B_dmz. Found by decoding a trained Q-table: an action that is
+        never legal is never taken, so it is never updated, so it keeps its optimistic
+        0.0 forever and dominates any unmasked argmax over the row."""
+        verbs = {a.verb for a in act.ACTION_SPACES["B_dmz"]}
+        assert Verb.DEPLOY_HONEYPOT not in verbs
+        for agent in ("B_corp", "B_secure"):
+            assert Verb.DEPLOY_HONEYPOT in {a.verb for a in act.ACTION_SPACES[agent]}
+
+    def test_no_action_is_unsatisfiable(self) -> None:
+        """Every action must be legal in *some* coherent state.
+
+        Constructing states directly rather than sampling trajectories, because the two
+        are different claims. A trajectory sample only shows what a particular opponent
+        happens to reach -- the scripted attacker beelines for the pivot and never widens
+        inside Corp, so its rollouts make perfectly satisfiable actions look dead. What
+        matters here is whether an action's legality predicate can be satisfied at all,
+        and that is answered by building the state, not by waiting for one.
+
+        The states are coherent by construction: layers are breached along a valid prefix
+        of the partial order, so no state has Layer 4 down while Layer 3 still stands.
+        """
+        import numpy as np
+        from marlsoc.env.layers import Layer
+
+        rng = np.random.default_rng(0)
+        ever = {a: np.zeros(len(act.ACTION_SPACES[a]), dtype=bool)
+                for a in act.ACTION_SPACES}
+
+        orderings = (
+            (Layer.PERIMETER, Layer.DMZ_BOUNDARY, Layer.AUTH, Layer.SEGMENTATION,
+             Layer.PRIVILEGE, Layer.APPROVAL),
+            (Layer.PERIMETER, Layer.DMZ_BOUNDARY, Layer.AUTH, Layer.SEGMENTATION,
+             Layer.APPROVAL, Layer.PRIVILEGE),   # the L5/L6 branch, taken the other way
+        )
+        hosts = [h.name for h in topo.HOSTS if not h.is_honeypot_slot
+                 and h.role is not topo.Role.LOG_SINK]
+
+        for trial in range(1_500):
+            state = fresh()
+            order = orderings[trial % 2]
+            for layer in order[: int(rng.integers(0, len(order) + 1))]:
+                state.layers = state.layers.breach(layer)
+
+            state.discovered.update(h.name for h in topo.HOSTS)
+            for name in hosts:
+                roll = rng.random()
+                if roll < 0.35:
+                    state.compromise(name)
+                elif roll < 0.45:
+                    state.isolate(name)
+            if rng.random() < 0.5:
+                state.deploy_honeypot("honeypot-1")
+            if rng.random() < 0.5:
+                state.deploy_honeypot("honeypot-2")
+
+            for agent in act.ACTION_SPACES:
+                ever[agent] |= act.legal_mask(state, agent)
+
+        for agent, seen in ever.items():
+            dead = [str(act.ACTION_SPACES[agent][i]) for i in np.flatnonzero(~seen)]
+            assert not dead, f"{agent} can never legally: {dead}"
 
     def test_honeypots_cannot_be_deployed_twice(self) -> None:
         state = fresh()
