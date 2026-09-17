@@ -124,7 +124,29 @@ set-membership with progress features (current foothold, deepest zone reached, b
 count of reachable unexplored hosts, heat level ≈ 468 states). Finalise this at Phase 3;
 Phase 2's red is scripted and needs no Q-table.
 
-### 3.7 Progress reporting is built in from Phase 1
+### 3.7 Every agent has three independent switches
+
+Each agent is configured by an `AgentConfig` with three orthogonal fields, because
+"turn an agent off" means three different things and collapsing them would force a
+rewrite of the training loop for every experiment:
+
+- `enabled` — does the agent act at all? (ablations, baselines, demo control)
+- `learning` — does it update its Q-table? (alternating training, frozen deployment)
+- `policy` — `LEARNED` / `SCRIPTED` / `RANDOM` / `GREEDY` / `NOOP`
+
+A `ScenarioConfig` bundles per-agent configs plus a `seed`. This single mechanism
+covers the demo controls, the three baselines in `PROJECT.md` §9 and the agent
+ablation in the experiment grid — "all blue agents disabled" *is* the static-firewall
+baseline.
+
+Episodes must be **exactly reproducible from a seed**, so a chosen episode can be
+replayed on demand for a demo. Selecting a representative seeded episode to show is
+legitimate; altering exploit probabilities or detection rates to manufacture an outcome
+and then reporting it as a result is not. Demos pair two runs on the **same seed** with
+one variable changed (e.g. blue disabled vs blue trained), and any single episode shown
+is accompanied by the aggregate over many runs.
+
+### 3.8 Progress reporting is built in from Phase 1
 
 Every episode writes a row: `episode, phase, learner, red_return, blue_return, outcome,
 steps, hosts_compromised, mttd, mttc, false_positives, honeypot_hits, epsilon`. Live
