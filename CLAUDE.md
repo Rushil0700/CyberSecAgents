@@ -116,13 +116,40 @@ theoretically unsound in the multi-agent setting.
 (8 actions) and `B_secure` has four (10 actions). Action spaces are built per agent from
 the topology; never assume a single shared action space.
 
-### 3.6 Red's state discretization is deferred to Phase 3
+### 3.6 Red's state discretization — resolved at Phase 1
 
-The naive attacker state — bitmasks of discovered and compromised hosts — is
-2¹³ × 2¹³ × 3 ≈ 201M states, roughly 20,000× over budget. The plan is to replace
-set-membership with progress features (current foothold, deepest zone reached, bucketed
-count of reachable unexplored hosts, heat level ≈ 468 states). Finalise this at Phase 3;
-Phase 2's red is scripted and needs no Q-table.
+Superseded by the six-layer `PROJECT.md` §5.2, which gives red progress features rather
+than host bitmasks: `(current_zone, footholds_bucket, creds_held, privilege_escalated,
+mfa_degraded, heat_level)`. Implemented in `env/observations.py`.
+
+**Spec arithmetic correction:** §5.2 states `4 × 4 × 2 × 2 × 2 × 3 = 768`. The product is
+**384**. The argument built on it is unaffected — §5.2's claim that six layers cost 8×
+over two holds exactly, since two layers is `4 × 4 × 3 = 48` and three binary flags is
+2³. Asserted in `tests/test_observations.py` so the slide and the code cannot drift.
+
+### 3.9 Some hosts are gates, not targets (Phase 1)
+
+`edge-gateway` (L1) and `mfa-service` (L6) have `exploit_prob = 0.0` and a separate
+`bypass_prob`. They are passed, never owned. If they were ownable, red's cheapest policy
+would be to compromise them like any other host and the six heterogeneous layers would
+collapse into "exploit six hosts in a row" — losing §3.1's entire argument.
+
+### 3.10 The layer preconditions are a partial order (Phase 1)
+
+L6 requires L4, **not** L5. Once red holds the pivot it has network reach to
+`mfa-service`, so degrading MFA is genuinely available before escalating privilege. A
+total order would make the six-layer environment a single path with no decisions in it;
+the branch forces red to *learn* an ordering.
+
+### 3.11 Detection is calibrated so that stealth works (Phase 1)
+
+Alert accumulation reaches `p / (1 - decay)`. A compromised host sitting idle settles at
+1.00 against a suspicion threshold of 1.5 — it never even looks suspicious. Acting is
+what exposes it, and the noisiest layer is 4× more visible than the quietest. A stealthy
+red therefore never reads as `COMPROMISED`, only ever `SUSPICIOUS`, so blue must choose
+between isolating on suspicion and paying, or waiting for a confirmation it will never
+get. Do not "fix" the false-alert rate or the 0.85 detection ceiling: both are load-
+bearing for §5.3's tradeoff and §7.2's cliff-walking argument.
 
 ### 3.7 Every agent has three independent switches
 
@@ -175,9 +202,23 @@ times as they happen.
 
 ## 5. Where we are
 
-**Phase 0 — in progress.** Repo initialised, this file written.
+**Phases 0 and 1 — complete.** The simulated twin runs. `config.py` plus eight modules
+under `env/` (topology, layers, state, detection, observations, actions, rewards,
+minicorp, compose_gen), 185 tests, and a generated `docker-compose.yml`. Write-up and
+revision material: `notes/phase1-environment.md`.
 
-Build order is `PROJECT.md` §12. Do not skip ahead, and do not build Phase 4 (Docker)
-before Phase 2 (a working single-agent learning curve) exists. Current priority is
-**Phases 0–2**, because a proposal presentation needs a real learning curve to
-demonstrate feasibility.
+Feasibility is established and test-enforced: red wins 100% against a static defence at
+every curriculum stage, and 0% against even a random defender at mean depth 0.78 of 6.
+Red can win; random exploration cannot find it — which is §7.4's sparse-reward argument
+demonstrated rather than asserted.
+
+**Phase 2 — next.** A single blue agent learning Q-Learning against a scripted attacker,
+layers 1–2 only. This is what the proposal presentation needs: a real learning curve.
+
+Build order is `PROJECT.md` §12. Do not skip ahead, and do not build the Docker lab
+(Phase 6) before a working learning curve (Phase 2) exists.
+
+**Note on the spec:** `PROJECT.md` was revised from three zones to four and from a flat
+chain to six heterogeneous layers. §3 above predates that revision in places; where §3
+and the current `PROJECT.md` conflict on topology, `PROJECT.md` wins, but the *amendments*
+in §3.1–3.4 and §3.7–3.8 still stand and are implemented.
