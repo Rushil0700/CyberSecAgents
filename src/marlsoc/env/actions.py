@@ -30,9 +30,18 @@ Section 4.1 lists both and maps them to Layers 2 and 4, but as specified they ar
 same mechanic under two names. Here they differ in a way that matters strategically and
 that the mask can express:
 
-    exploit(h)       compromise a host in a zone red is already in -- or its very first
-                     foothold, from outside. *Widen.*
-    lateral_move(h)  compromise a host in a strictly deeper zone. *Advance.*
+    exploit(h)       compromise an ordinary host in a zone red is already in -- or its
+                     very first foothold, from outside. *Widen.*
+    lateral_move(h)  compromise a host sitting behind a segmentation boundary: one in a
+                     deeper zone, **or the pivot**. *Advance.*
+
+The pivot is included even though it shares the corporate zone with hosts red may
+already hold, because Layer 4 is micro-segmentation *inside* Corp -- reaching
+``ad-controller`` is a lateral move whether or not the zone changes. Leaving it out was
+a real bug caught by a stage-by-stage win-rate check: red took the pivot with
+``exploit`` as ordinary intra-zone widening and walked straight through Layer 4 without
+ever breaching it, plateauing at depth 3 in every curriculum stage. ``exploit`` is
+therefore barred from the pivot outright.
 
 That keeps the one-to-one action-to-layer mapping in section 4.1 honest rather than
 having two names for one move, and it makes "spread out in the DMZ before pushing in" a
@@ -242,6 +251,10 @@ def is_legal(state: EpisodeState, agent: str, action: Action) -> bool:
     if verb is Verb.EXPLOIT:
         assert action.host is not None
         host = topo.BY_NAME[action.host]
+        if host.role is Role.PIVOT:
+            # Layer 4 guards the pivot. Allowing ordinary intra-zone widening onto it
+            # would let red past that layer without breaching it -- see the docstring.
+            return False
         if state.status(action.host) is not HostStatus.CLEAN:
             return False              # already owned, or off the network
         if action.host not in state.discovered:
@@ -267,11 +280,12 @@ def is_legal(state: EpisodeState, agent: str, action: Action) -> bool:
             return False
         if not _red_can_reach(state, action.host):
             return False
-        # Advance: strictly deeper than every zone red currently holds.
+        # Advance: behind a segmentation boundary -- a deeper zone, or the pivot.
         if not state.footholds:
             return False
         deepest_held = max(topo.ZONE_DEPTH[topo.BY_NAME[f].zone] for f in state.footholds)
-        if topo.ZONE_DEPTH[host.zone] <= deepest_held:
+        deeper = topo.ZONE_DEPTH[host.zone] > deepest_held
+        if not (deeper or host.role is Role.PIVOT):
             return False
         # Entering Corp needs credentials (L3); entering Secure needs privilege (L5).
         gate = {Zone.CORP: Layer.AUTH, Zone.SECURE: Layer.PRIVILEGE}.get(host.zone)

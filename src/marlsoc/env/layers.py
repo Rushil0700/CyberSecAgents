@@ -266,6 +266,18 @@ class LayerStatus:
             raise ValueError(f"{layer.name} is not currently attemptable")
         return LayerStatus(active=self.active, breached=self.breached | {layer})
 
+    def restore(self, layer: Layer) -> LayerStatus:
+        """Return a new status with ``layer`` repaired -- blue's reinforcement actions.
+
+        Red must then breach it again, which is what turns a single intrusion into the
+        arms race section 9 wants to plot. Restoring an unbreached layer is a no-op
+        rather than an error, because the action mask already prevents it and a second
+        guard here would only duplicate that rule in two places.
+        """
+        if layer not in self.breached:
+            return self
+        return LayerStatus(active=self.active, breached=self.breached - {layer})
+
     def can_win(self) -> bool:
         """Whether ``alter_credentials`` is unblocked by the layer model.
 

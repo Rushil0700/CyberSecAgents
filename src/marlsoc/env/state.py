@@ -85,6 +85,8 @@ class EpisodeState:
         layers: Which of the six layers are active and which red has breached.
         true_status: Ground-truth status per host. Honeypot slots start absent from
             play and are added by blue's ``deploy_honeypot``.
+        zones_entered: Every zone red has ever held a foothold in. A high-water mark,
+            never removed from -- see ``deepest_zone_depth``.
         discovered: Hosts red knows exist. Recon (``scan`` / ``slow_scan``) grows this;
             red cannot act on a host it has not discovered, which is what gives
             ``R_scout`` something to contribute and creates the credit-assignment
@@ -93,6 +95,10 @@ class EpisodeState:
             and is bucketed into red's ``heat_level`` observation.
         alerts: Per-host accumulated alert points on the *blue* side. Written by
             ``detection.py``; the raw counter behind each zone's alert level.
+        blocked_until: Step at which each host's ``block`` expires. A blocked host
+            cannot be compromised, costs no availability, and does nothing at all once
+            the host is already compromised -- which is what makes ``block`` a genuinely
+            different decision from ``isolate`` rather than a second name for it.
         honeypots_live: Honeypot slots blue has deployed this episode.
         outcome: Terminal status, or RUNNING.
         detected_step: First step at which any truly compromised host was flagged
@@ -115,8 +121,10 @@ class EpisodeState:
     step: int = 0
     true_status: dict[str, HostStatus] = field(default_factory=dict)
     discovered: set[str] = field(default_factory=set)
+    zones_entered: set[Zone] = field(default_factory=lambda: {Zone.EDGE})
     heat: float = 0.0
     alerts: dict[str, float] = field(default_factory=dict)
+    blocked_until: dict[str, int] = field(default_factory=dict)
     honeypots_live: set[str] = field(default_factory=set)
     outcome: Outcome = Outcome.RUNNING
 
@@ -187,24 +195,18 @@ class EpisodeState:
         """How far in red has *ever* been, not where it is now.
 
         Distinct from ``current_zone`` because blue can isolate red back out of a zone;
-        the progress feature should not un-learn when that happens, or red's state would
-        oscillate between two rows of the Q-table for the same strategic situation.
-        Computed from breached layers rather than from footholds for that reason.
-        """
-        return max(
-            (topo.ZONE_DEPTH[z] for z in (Zone.EDGE, Zone.DMZ, Zone.CORP, Zone.SECURE)
-             if self._zone_entered(z)),
-            default=0,
-        )
+        progress must not un-learn when that happens, or red's state would oscillate
+        between two Q-table rows for the same strategic situation.
 
-    def _zone_entered(self, zone: Zone) -> bool:
-        gate = {
-            Zone.EDGE: None,
-            Zone.DMZ: Layer.PERIMETER,
-            Zone.CORP: Layer.SEGMENTATION,
-            Zone.SECURE: Layer.PRIVILEGE,
-        }[zone]
-        return gate is None or self.layers.is_breached(gate)
+        Derived from ``zones_entered`` -- an actual high-water mark over footholds --
+        and **not** from breached layers. Deriving it from layers was a real bug: under a
+        curriculum stage where Layer 4 is inactive it can never be *breached*, so Corp
+        never counted as entered, the secure zone stayed unscannable and red could never
+        discover the crown jewel. The symptom was stage 1-3 winning 0% of episodes while
+        the strictly harder stage 1-4 won 100%. Where red has been is a fact about
+        footholds, not about which layers the curriculum happens to have switched on.
+        """
+        return max(topo.ZONE_DEPTH[z] for z in self.zones_entered)
 
     # ---- section 5.2 flags: derived from the layer model, never stored ---------------
     @property
@@ -228,6 +230,7 @@ class EpisodeState:
     def compromise(self, host: str) -> None:
         """Red owns ``host`` from now on. Stamps the compromise clock on first use."""
         self.true_status[host] = HostStatus.COMPROMISED
+        self.zones_entered.add(topo.BY_NAME[host].zone)
         if self.first_compromise_step is None:
             self.first_compromise_step = self.step
 
@@ -243,6 +246,19 @@ class EpisodeState:
         self.true_status[host] = HostStatus.ISOLATED
         if not self.footholds and self.contained_step is None:
             self.contained_step = self.step
+
+    def block(self, host: str, duration: int) -> None:
+        """Harden ``host`` against compromise for ``duration`` steps.
+
+        Deliberately does nothing to a host red already holds: blocking is prevention,
+        and a preventive control that also worked retroactively would make ``isolate``
+        -- and its availability cost -- pointless.
+        """
+        if self.status(host) is HostStatus.CLEAN:
+            self.blocked_until[host] = self.step + duration
+
+    def is_blocked(self, host: str) -> bool:
+        return self.blocked_until.get(host, -1) > self.step
 
     def mark_detected(self) -> None:
         """A truly compromised host has been flagged. Stamps MTTD once."""
