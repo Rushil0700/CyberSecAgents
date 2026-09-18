@@ -108,3 +108,57 @@ def comparison(
     fig.savefig(path, dpi=130)
     plt.close(fig)
     return path
+
+
+def curriculum_curve(
+    log: MetricsLog,
+    transitions,
+    path: Path,
+    *,
+    title: str = "Curriculum learning — red vs a static defence",
+    window: int = 200,
+) -> Path:
+    """The sawtooth. PROJECT.md section 7.4 calls this the report's best figure.
+
+    Success rate climbs, a layer is switched on, it drops, it climbs again. Two things
+    make the drop legible rather than confusing, and both are marked on the plot: the
+    stage transition itself, and the exploration boost that accompanies it -- part of
+    each drop is red exploring again rather than red having got worse.
+
+    The layer-depth panel underneath is section 9's "money graph" -- it degrades
+    gracefully where a binary win/lose curve does not, and it shows red pushing deeper
+    stage by stage.
+    """
+    import numpy as np
+
+    fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
+
+    success = np.array([1.0 if r.outcome == "red_win" else 0.0 for r in log.rows])
+    if success.size:
+        w = min(window, success.size)
+        curve = np.convolve(success, np.ones(w) / w, mode="valid")
+        axes[0].plot(range(w - 1, w - 1 + curve.size), curve, color="#d62728", lw=1.5)
+    axes[0].set_ylabel("attacker success")
+    axes[0].set_ylim(-0.05, 1.05)
+    axes[0].set_title(title)
+    axes[0].grid(alpha=0.25, lw=0.5)
+
+    _panel(axes[1], log, "layers_breached", "layers breached", window, "#9467bd")
+    axes[1].set_ylim(0, 6.4)
+    axes[1].set_xlabel(f"episode   (rolling mean, window = {window})")
+
+    for transition in transitions:
+        for ax in axes:
+            ax.axvline(transition.episode, color="#444", ls="--", lw=0.9, alpha=0.7)
+        axes[0].annotate(
+            f"stage {transition.to_stage}\nlayers 1-{transition.to_stage + 1}",
+            xy=(transition.episode, 1.0), xytext=(4, -12),
+            textcoords="offset points", fontsize=8,
+            color="#b00" if transition.forced else "#444",
+        )
+
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+    return path

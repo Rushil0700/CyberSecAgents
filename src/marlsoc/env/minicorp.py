@@ -100,12 +100,19 @@ class MiniCorp:
     # ----------------------------------------------------------------------------------
     # Episode lifecycle
     # ----------------------------------------------------------------------------------
-    def reset(self, seed: int | None = None) -> dict[str, tuple[int, ...]]:
+    def reset(
+        self, seed: int | None = None, max_layer: int | None = None
+    ) -> dict[str, tuple[int, ...]]:
         """Start a fresh episode and return each agent's first observation.
 
         Args:
             seed: Overrides the scenario seed. Passing the same seed twice replays an
                 episode exactly, which is what CLAUDE.md 3.7 requires for the demo.
+            max_layer: Deepest active layer for this episode, overriding the scenario.
+                This is how the curriculum in section 7.4 deepens the stack: the schedule
+                belongs to the training loop, not to the environment, so ScenarioConfig
+                stays frozen and serialisable and the environment never has to know what
+                a "stage" is.
 
         Returns:
             ``{agent: observation tuple}`` for all five agents.
@@ -113,9 +120,8 @@ class MiniCorp:
         self.rng = np.random.default_rng(
             self.scenario.seed if seed is None else seed
         )
-        self.state = EpisodeState.initial(
-            LayerStatus.for_stage(self.scenario.max_layer)
-        )
+        stage = self.scenario.max_layer if max_layer is None else max_layer
+        self.state = EpisodeState.initial(LayerStatus.for_stage(stage))
         return self.observations()
 
     def observations(self) -> dict[str, tuple[int, ...]]:

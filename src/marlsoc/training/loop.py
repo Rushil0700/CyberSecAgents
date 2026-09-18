@@ -58,6 +58,7 @@ from marlsoc.env import topology as topo
 from marlsoc.env.actions import Verb
 from marlsoc.env.minicorp import MiniCorp
 from marlsoc.env.state import EpisodeState
+from marlsoc.training.curriculum import Curriculum, CurriculumConfig
 from marlsoc.training.metrics import EpisodeRecord, MetricsLog
 
 
@@ -192,6 +193,7 @@ def run_episode(
     seed: int | None = None,
     *,
     learn: bool = True,
+    max_layer: int | None = None,
 ) -> tuple[EpisodeRecord, dict[str, float]]:
     """Run one episode to termination and return its metrics row.
 
@@ -203,11 +205,12 @@ def run_episode(
             being the same episode; fixing it is what replays one for a demo.
         learn: Global override. False for evaluation runs, so a measurement never
             changes the thing being measured.
+        max_layer: Curriculum stage for this episode; see ``MiniCorp.reset``.
 
     Returns:
         The episode record and the per-agent undiscounted returns.
     """
-    env.reset(seed)
+    env.reset(seed, max_layer)
     returns = {agent: 0.0 for agent in ALL_AGENTS}
 
     # A NoopController ignores both its observation and its mask, so computing either
@@ -398,3 +401,94 @@ def evaluate(
         if isinstance(controller, LearnedController):
             controller.greedy = False
     return log
+
+
+# --------------------------------------------------------------------------------------
+# Curriculum training (PROJECT.md section 7.4)
+# --------------------------------------------------------------------------------------
+class CurriculumRun(NamedTuple):
+    """A curriculum run: the trained agents, the episode log, and the stage history."""
+
+    controllers: dict[str, Controller]
+    log: MetricsLog
+    curriculum: Curriculum
+
+
+def train_curriculum(
+    scenario: ScenarioConfig,
+    episodes: int,
+    learner_config: LearnerConfig | None = None,
+    curriculum_config: CurriculumConfig | None = None,
+    *,
+    report_every: int = 1_000,
+    verbose: bool = True,
+) -> CurriculumRun:
+    """Train against a progressively deeper layer stack.
+
+    The Q-table is never reset between stages -- that carry-forward *is* the transfer
+    section 7.4 calls the whole point. A table that has learned "get a DMZ foothold"
+    already knows how when Layer 3 switches on, so stage 2 only has to learn the new
+    layer rather than the whole chain again.
+
+    Each episode's ``phase`` records the stage it was played at, so the sawtooth plot and
+    any per-stage analysis come straight out of the CSV without a second bookkeeping
+    path.
+
+    Args:
+        scenario: Agent switches and seed. Its ``max_layer`` is ignored -- the curriculum
+            supplies the stage per episode.
+        episodes: Total training episodes across all stages.
+        learner_config: Hyperparameters for every learning agent.
+        curriculum_config: Promotion rules.
+        report_every: Console summary interval.
+        verbose: Print progress and transitions.
+
+    Returns:
+        The controllers, the per-episode log, and the curriculum with its transitions.
+    """
+    rng = np.random.default_rng(scenario.seed)
+    env = MiniCorp(scenario)
+    controllers = {
+        agent: build_controller(agent, scenario.for_agent(agent), rng, learner_config)
+        for agent in ALL_AGENTS
+    }
+    curriculum = Curriculum(curriculum_config or CurriculumConfig())
+    log = MetricsLog()
+
+    for episode in range(episodes):
+        stage = curriculum.max_layer
+        record, _ = run_episode(
+            env, controllers, scenario,
+            seed=scenario.seed * 1_000_003 + episode,
+            max_layer=stage,
+        )
+        log.append(EpisodeRecord(**{
+            **record.__dict__,
+            "episode": episode,
+            "phase": f"stage{curriculum.stage_number}",
+            "learner": "red",
+        }))
+
+        transition = curriculum.record(
+            won=record.outcome == "red_win", episode=episode
+        )
+        if transition is not None:
+            # A new stage contains a behaviour red has never performed; a nearly greedy
+            # policy cannot find it. See curriculum.py's design note.
+            boost = curriculum.config.epsilon_on_promote
+            if boost is not None:
+                for controller in controllers.values():
+                    if controller.learner is not None:
+                        controller.learner.boost_exploration(boost)
+            if verbose:
+                tag = "  (FORCED)" if transition.forced else ""
+                print(f"  ep {episode:>6}  stage {transition.from_stage} -> "
+                      f"{transition.to_stage}  (success {transition.success_rate:.1%},"
+                      f" now layers 1-{curriculum.max_layer}){tag}")
+
+        if verbose and report_every and (episode + 1) % report_every == 0:
+            print(f"{log.summary(report_every)}  | stage {curriculum.stage_number} "
+                  f"(layers 1-{curriculum.max_layer}), "
+                  f"recent success {curriculum.success_rate:.1%}")
+
+    return CurriculumRun(controllers, log, curriculum)

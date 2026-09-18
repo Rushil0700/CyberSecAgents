@@ -317,3 +317,161 @@ class TestPlots:
         from marlsoc.training import plots
         logs = {"q_learning": self._log(400), "sarsa": self._log(400)}
         assert plots.comparison(logs, tmp_path / "cmp.png", window=50).exists()
+
+
+class TestCurriculum:
+    """Section 7.4's stage progression, and the two rules that are not in the spec."""
+
+    def _config(self, **kw):
+        from marlsoc.training.curriculum import CurriculumConfig
+        base = dict(promote_window=10, min_episodes_per_stage=10,
+                    promote_threshold=0.7, max_episodes_per_stage=1000)
+        base.update(kw)
+        return CurriculumConfig(**base)
+
+    def _curriculum(self, **kw):
+        from marlsoc.training.curriculum import Curriculum
+        return Curriculum(self._config(**kw))
+
+    def test_it_starts_at_stage_one(self) -> None:
+        c = self._curriculum()
+        assert c.stage_number == 1 and c.max_layer == 2 and not c.finished
+
+    def test_clearing_a_stage_deepens_the_stack(self) -> None:
+        c = self._curriculum()
+        transition = None
+        for i in range(10):
+            transition = c.record(won=True, episode=i) or transition
+        assert transition is not None
+        assert transition.from_stage == 1 and transition.to_stage == 2
+        assert c.max_layer == 3
+
+    def test_a_lucky_streak_cannot_promote_before_the_dwell_time(self) -> None:
+        """Early in a stage epsilon is high, and a run of fortunate episodes can clear a
+        window before red has learned anything stable. It would then arrive at the next
+        stage with a Q-table full of noise and fail there, which reads as 'the curriculum
+        stalled' rather than 'it was promoted too early'."""
+        c = self._curriculum(min_episodes_per_stage=50)
+        for i in range(40):
+            assert c.record(won=True, episode=i) is None
+        assert c.stage_number == 1
+
+    def test_failing_keeps_red_on_the_stage(self) -> None:
+        c = self._curriculum()
+        for i in range(60):
+            assert c.record(won=False, episode=i) is None
+        assert c.stage_number == 1
+
+    def test_the_threshold_is_actually_applied(self) -> None:
+        # 50% success against a 70% threshold must not promote.
+        c = self._curriculum()
+        for i in range(60):
+            assert c.record(won=i % 2 == 0, episode=i) is None
+        assert c.stage_number == 1
+
+    def test_the_window_resets_after_a_promotion(self) -> None:
+        """Otherwise the cleared stage's wins would carry into the next stage's window
+        and promote red again immediately, skipping stages it never played."""
+        c = self._curriculum()
+        for i in range(10):
+            c.record(won=True, episode=i)
+        assert c.stage_number == 2
+        assert c.success_rate == 0.0
+
+    def test_a_stuck_stage_is_force_promoted_and_flagged(self) -> None:
+        """A stage red cannot clear would otherwise consume the whole budget and the run
+        would say nothing about the later stages. A forced promotion is recorded so it
+        can never be mistaken for a real one."""
+        c = self._curriculum(max_episodes_per_stage=30)
+        transition = None
+        for i in range(30):
+            transition = c.record(won=False, episode=i) or transition
+        assert transition is not None and transition.forced
+        assert "FORCED" in c.summary()
+
+    def test_the_final_stage_never_promotes(self) -> None:
+        from marlsoc.training.curriculum import STAGES
+        c = self._curriculum()
+        for stage in range(len(STAGES) - 1):
+            for i in range(10):
+                c.record(won=True, episode=i)
+        assert c.finished and c.max_layer == 6
+        for i in range(50):
+            assert c.record(won=True, episode=i) is None
+
+
+class TestExplorationBoost:
+    """Not in the spec, and the curriculum does not work without it."""
+
+    def _learner(self, **kw):
+        from marlsoc.agents.tabular import LearnerConfig, TabularLearner
+        cfg = LearnerConfig(epsilon_start=1.0, epsilon_end=0.05,
+                            epsilon_decay_episodes=1000, **kw)
+        return TabularLearner("t", 4, 3, cfg, np.random.default_rng(0))
+
+    def test_boosting_restores_the_requested_rate(self) -> None:
+        L = self._learner()
+        for _ in range(1000):
+            L.end_episode()
+        assert L.epsilon == pytest.approx(0.05, abs=1e-6)
+        L.boost_exploration(0.40)
+        assert L.epsilon == pytest.approx(0.40, abs=0.01)
+
+    def test_decay_continues_normally_afterwards(self) -> None:
+        """Implemented by inverting the schedule rather than storing an offset, so the
+        agent stays on one continuous schedule."""
+        L = self._learner()
+        for _ in range(1000):
+            L.end_episode()
+        L.boost_exploration(0.40)
+        before = L.epsilon
+        for _ in range(300):
+            L.end_episode()
+        assert L.epsilon < before
+
+    def test_a_request_outside_the_schedule_is_clamped(self) -> None:
+        # Asking for more exploration than the schedule ever had just means starting over.
+        L = self._learner()
+        L.boost_exploration(5.0)
+        assert L.epsilon <= 1.0
+        L.boost_exploration(0.0)
+        assert L.epsilon >= 0.05
+
+
+class TestCurriculumTraining:
+    def test_a_run_progresses_through_stages_and_logs_them(self) -> None:
+        from marlsoc.agents.tabular import Algorithm, LearnerConfig
+        from marlsoc.config import static_firewall
+        from marlsoc.training.curriculum import CurriculumConfig
+        from marlsoc.training.loop import train_curriculum
+
+        sc = ScenarioConfig(seed=1, agents=static_firewall().agents)
+        cfg = LearnerConfig(algorithm=Algorithm.SARSA, epsilon_decay_episodes=200)
+        run = train_curriculum(
+            sc, 700, cfg,
+            CurriculumConfig(min_episodes_per_stage=100, promote_window=50),
+            verbose=False,
+        )
+        assert run.curriculum.stage_number > 1, "red never cleared stage 1 unopposed"
+        assert run.curriculum.transitions
+        # The stage is recorded per episode, so the sawtooth comes out of the CSV.
+        assert {r.phase for r in run.log.rows} >= {"stage1", "stage2"}
+
+    def test_the_q_table_is_carried_across_stages(self) -> None:
+        """The transfer section 7.4 calls the whole point: a table that has learned to
+        get a DMZ foothold already knows how when Layer 3 switches on."""
+        from marlsoc.agents.tabular import Algorithm, LearnerConfig
+        from marlsoc.config import static_firewall
+        from marlsoc.training.curriculum import CurriculumConfig
+        from marlsoc.training.loop import train_curriculum
+
+        sc = ScenarioConfig(seed=1, agents=static_firewall().agents)
+        run = train_curriculum(
+            sc, 600, LearnerConfig(algorithm=Algorithm.SARSA, epsilon_decay_episodes=200),
+            CurriculumConfig(min_episodes_per_stage=100, promote_window=50),
+            verbose=False,
+        )
+        learner = run.controllers["R_breach"].learner
+        assert learner is not None and learner.updates > 0
+        assert run.curriculum.transitions          # it did move stages
+        assert learner.coverage > 0.0              # ...on one continuous table

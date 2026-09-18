@@ -65,6 +65,7 @@ the reward scale, which is exactly why it should not be hidden inside a call to
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from enum import Enum
 from typing import Final
@@ -175,6 +176,36 @@ class TabularLearner:
     def end_episode(self) -> None:
         """Advance the exploration schedule. Called once per episode, not per step."""
         self.episode += 1
+
+    def boost_exploration(self, epsilon: float) -> None:
+        """Rewind the schedule so the current exploration rate becomes ``epsilon``.
+
+        Used by the curriculum (PROJECT.md section 7.4) on promotion. A new stage
+        contains a behaviour the agent has never performed, and a nearly greedy policy
+        cannot find it -- every action it would need to try ranks below what already
+        works. Without this the curriculum stalls at the first stage requiring genuinely
+        new behaviour, which is section 15's "curriculum stage never promotes".
+
+        Implemented by inverting the geometric schedule rather than by storing an offset,
+        so the agent stays on one continuous schedule and epsilon keeps decaying normally
+        afterwards::
+
+            epsilon = start * (end / start) ** (episode / decay_episodes)
+            => episode = decay_episodes * log(epsilon / start) / log(end / start)
+
+        A request outside ``[epsilon_end, epsilon_start]`` is clamped rather than
+        rejected: asking for more exploration than the schedule ever had is a reasonable
+        thing for a caller to want, and it simply means starting over.
+        """
+        cfg = self.config
+        if cfg.epsilon_decay_episodes <= 0 or cfg.epsilon_start <= 0.0:
+            return
+        target = min(max(epsilon, cfg.epsilon_end), cfg.epsilon_start)
+        ratio = cfg.epsilon_end / cfg.epsilon_start
+        if ratio <= 0.0 or ratio == 1.0:
+            return
+        fraction = math.log(target / cfg.epsilon_start) / math.log(ratio)
+        self.episode = max(0, int(cfg.epsilon_decay_episodes * fraction))
 
     # ----------------------------------------------------------------------------------
     # Policy
