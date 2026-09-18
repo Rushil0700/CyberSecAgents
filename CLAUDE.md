@@ -275,9 +275,28 @@ unaffected, which is why the full six-layer game hid it. **Reconcile the simples
 against arithmetic you can do on paper** — 100% attacker success had to cost about −125
 and was reading −38.6.
 
-**Phase 3 — next.** Red learns with the curriculum, stages 1–5, against a static defence
-(`PROJECT.md` §7.4). The stage machinery Phase 2 forced into correctness is what Phase 3
-is built on.
+### 3.17 The random defender is not a security floor (Phase 3)
+
+`PROJECT.md` §9 lists the random defender as "baseline 1 — floor". It is not, on the
+security axis. Measured against a scripted attacker: it ends an episode with **3.46 of its
+4 hosts isolated**, matching the trained defender's security (9.0% attacker success against
+10.5%) at **2.3× the cost** (return −980 against −420, and 2.67 false positives against
+1.42).
+
+`isolate` is deterministic and permanent, so a defender picking uniformly at random
+*accidentally plays the degenerate lockdown*. It is the floor on **availability**, and
+comparing security against it flatters nothing. Quote it alongside its false-positive rate
+or it reads as a stronger baseline than it is.
+
+**Phase 3 — in progress.** Red learns with the curriculum (`PROJECT.md` §7.4). Two things
+found immediately:
+
+- **Against a static defence the curriculum is unnecessary** — red already wins ~100% at
+  every stage unopposed (measured in Phase 1). §12's "red vs static defence" is a warm-up,
+  not an experiment; the curriculum's value can only show against a defender that acts.
+- **Against a random defender red never wins at all**, curriculum or not, because of §3.17
+  above. The meaningful opponent is the *trained* defender, which is penalised for
+  lockdown.
 
 Build order is `PROJECT.md` §12. Do not skip ahead, and do not build the Docker lab
 (Phase 6) before a working learning curve (Phase 2) exists.
