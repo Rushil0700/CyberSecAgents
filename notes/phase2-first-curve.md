@@ -136,6 +136,21 @@ defending.** Same fix: the first fall of a layer pays, a re-breach does not.
 > each number looks in isolation. This is §15's "careless shaping → degenerate policy",
 > and it is worth checking every per-event reward for it.
 
+### 2.6 Blue could have denied the stage win forever — *found by reading the code*
+
+`objective_met()` tested the layers red *currently* holds breached, and
+`tighten_ratelimit` removes a layer from that set. So at stage 1–4 blue could repair Layer
+1 each time red completed the set, and the stage win would never fire.
+
+This is the reward farm from §2.3 a third time, with the reward taken out: the same
+repair loop, now used to deny termination rather than to collect +25. It would have shown
+up in the results as *excellent defence*.
+
+A stage objective is an achievement, not a state red must hold, so it is measured against
+the monotone `paid_breaches`. Repairing a layer still sets red back in every way that
+matters — red must breach it again to keep moving — it just cannot erase an objective
+already reached.
+
 ### 2.5 A curriculum stage win paid nothing — *found by disbelieving a baseline*
 
 The most instructive of the five, because it spent an afternoon disguised as a different
@@ -280,7 +295,26 @@ single fact explains two results that made no sense on their own:
    value the agent actually knew.
 
 `q_init` is now an explicit hyperparameter, with the diagnostic that found it
-(`untried_greedy_fraction`) next to it.
+(`untried_greedy_fraction`) next to it. Setting it to −150 — roughly the return of doing
+nothing — at stage 1–3:
+
+| | `q_init = 0` | `q_init = −150` |
+|---|---|---|
+| Greedy action never updated | **89%** | **7%** |
+| Blue return | −227 | **−183** |
+| Attacker success | 87.8% | 91.1% |
+
+The diagnosis is confirmed by the first row. The third row is the honest trade and worth
+understanding: stage 1–3 *rewards conceding*, so an agent that has finally started
+optimising its real objective concedes more. That is the agent getting **more** correct,
+not less — and it is further evidence that stage 1–3 is the wrong task rather than the fix
+being wrong.
+
+> **The general lesson.** Optimistic initialisation is an exploration technique with an
+> expiry date: it is only harmless once every state–action pair has been visited enough to
+> wash the optimism out. At 14.6% coverage it had not, so the "greedy policy" was mostly
+> reporting the initial value. Any evaluation of a greedy policy should check what
+> fraction of its choices are of actions it has never tried.
 
 ---
 
