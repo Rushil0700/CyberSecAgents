@@ -212,8 +212,57 @@ every curriculum stage, and 0% against even a random defender at mean depth 0.78
 Red can win; random exploration cannot find it — which is §7.4's sparse-reward argument
 demonstrated rather than asserted.
 
-**Phase 2 — next.** A single blue agent learning Q-Learning against a scripted attacker,
-layers 1–2 only. This is what the proposal presentation needs: a real learning curve.
+**Phase 2 — complete.** Q-Learning, SARSA and Expected SARSA from scratch, validated
+against Sutton & Barto's cliff walking; scripted opponent; training loop; metrics and
+plots; policy inspector; `experiments/phase2.py`. 260 tests. Write-up:
+`notes/phase2-first-curve.md`.
+
+Headline: at curriculum stage 1–4 a single learned `B_dmz` takes attacker success from
+**99.7% to 6.8%** (sd 7.6 over four seeds) and blue's return from **−1,315 to −224**.
+
+### 3.12 A curriculum stage ends at its own objective (Phase 2)
+
+§7.4's stage table says stage 1 teaches red to "get a foothold in the DMZ". Requiring the
+crown jewel at every stage does not do that — switching layers off removes the obstacles
+but leaves the same full-length journey, so a "shallow" stage is the whole network with
+its defences disabled, which is *easier* for red. A stage's objective is now to breach
+every **active** layer; Layer 6 is the exception because `alter_credentials` is the move
+it guards. Only after this did the stages become graded (3.4 / 5.5 / 29.1 / 40.1 steps).
+
+**Phase 2 runs at stage 1–4, not 1–2.** Measured: stage 1–2 is over in 3.4 steps and blue
+never gets a turn (100% → 99.3%); stage 1–3 gives blue time but not value, so a defensive
+stand costs more than the breach it prevents; stage 1–4 needs ~29 steps to the pivot,
+which is long enough for containment to pay for itself.
+
+### 3.13 Check every per-event reward for a farmable loop (Phase 2)
+
+Two were found. Blue farmed §5.3's +25 layer restoration (93.9% of its greedy actions;
+35.1 restorations an episode; 152% of its total reward) and red farmed the mirror image of
+the same loop on §5.4's ladder. **If two opposed agents can both profit from repeating one
+interaction, the reward is wrong however sensible each number looks alone.** Both are now
+paid once per layer per episode. `block` likewise cannot be free: a preventive control
+that is both free and effective strictly dominates.
+
+### 3.14 `q_init` is load-bearing; do not set it to zero by accident (Phase 2)
+
+Returns here are large and negative (≈ −150 typical, −2,500 bad), so initialising at 0.0
+gives every untried action a ~+150 optimism bonus. Good during training, ruinous at
+evaluation: after 4,000 episodes, **91% of visited states had a greedy action that had
+never been updated** (68% of decisions by visit weight). That is why a trained defender
+scored worse than always choosing `noop`, and why greedy scored worse than ε = 0.05. Use
+`TabularLearner.untried_greedy_fraction` to check.
+
+### 3.15 Decide termination before computing rewards (Phase 2)
+
+`_check_termination` is what sets `events.red_won` for a stage objective, so computing
+rewards first meant a stage win paid nothing at all. Only `alter_credentials` was
+unaffected, which is why the full six-layer game hid it. **Reconcile the simplest baseline
+against arithmetic you can do on paper** — 100% attacker success had to cost about −125
+and was reading −38.6.
+
+**Phase 3 — next.** Red learns with the curriculum, stages 1–5, against a static defence
+(`PROJECT.md` §7.4). The stage machinery Phase 2 forced into correctness is what Phase 3
+is built on.
 
 Build order is `PROJECT.md` §12. Do not skip ahead, and do not build the Docker lab
 (Phase 6) before a working learning curve (Phase 2) exists.

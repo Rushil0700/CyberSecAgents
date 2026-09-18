@@ -65,3 +65,35 @@ win; random exploration cannot find it. That is the sparse-reward argument demon
 
 **Next:** Phase 2 — a single blue agent learning Q-Learning against a scripted attacker,
 layers 1-2 only. The first learning curve, which is what the proposal presentation needs.
+
+## 2026-09-18 — Phase 2: the first learning curve
+
+Q-Learning, SARSA and Expected SARSA written from scratch and validated by reproducing
+Sutton & Barto's cliff walking (Q-Learning -58.5 online, SARSA -35.2, Expected SARSA
+-21.1, and Q-Learning's greedy path hugs the cliff). That is §7.2's argument reproduced
+rather than cited, and it is why red gets SARSA. Plus a scripted opponent, the training
+loop, metrics/CSV, plotting, a policy inspector, and `experiments/phase2.py`.
+
+Headline: at curriculum stage 1-4, a single learned `B_dmz` takes attacker success from
+**99.7% to 6.8%** (sd 7.6 over four seeds) and blue's return from **-1,315 to -224**.
+
+The twin also got 2.6× faster (1,764 → 4,509 episodes/minute) after profiling put half
+the runtime in `legal_mask`.
+
+**Six defects, five of them found by measuring rather than by testing.** Full write-up in
+`notes/phase2-first-curve.md`; the two worth remembering:
+
+- **Blue farmed the shaping reward.** `tighten_ratelimit` was the greedy action in 93.9%
+  of states. §5.3's flat +25 per layer restoration, against an attacker that re-breached
+  Layer 1 every ~2 steps, paid +12/step to let the attack continue — more than the
+  -10/step it was meant to prevent. 35.1 restorations per episode, 152% of total reward.
+  Red was farming the mirror image of the same loop.
+- **A curriculum stage win paid nothing.** `_check_termination` sets `events.red_won`, and
+  it ran *after* rewards were computed, so no stage win paid its ±100. Conceding was free
+  and blue correctly learned to concede. It looked exactly like a reward-design problem,
+  and I had a plausible fix drafted. What caught it was reconciling the static baseline
+  against arithmetic done by hand: 100% attacker success has to cost about -125, and it
+  was -38.6.
+
+**Next:** Phase 3 — red learns with the curriculum, stages 1-5, against a static defence.
+The stage machinery Phase 2 forced into correctness is exactly what Phase 3 needs.

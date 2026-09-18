@@ -20,19 +20,21 @@ stage was the whole network with its defences disabled -- easier for red, not sh
 A stage's objective is now to breach every *active* layer, which is what section 7.4's
 stage table actually describes.
 
-**Stage 1-2 is too shallow to contain a defensive decision.** Once stages were graded
-properly, a scripted attacker reaches the stage 1-2 objective in 3.7 steps: blue barely
-gets a turn, and a trained defender moves attacker success only from 100% to 95%. So
-Phase 2 uses **stage 1-3** -- the shallowest stage in which the defender has time to act.
-Measured over four seeds:
+**The shallowest stages contain no defensive decision worth making.** Once stages were
+graded properly, four seeds per stage at 4,000 episodes gave:
 
-    stage 1-2   attacker success 100% -> 95.0%  (sd  3.0)   too fast to defend
-    stage 1-3   attacker success 100% -> 73.4%  (sd  8.3)   <- Phase 2
-    stage 1-4   attacker success 100% -> 15.0%  (sd 21.8)   bigger effect, one seed in
-                                                             four fails outright
+    stage 1-2   attacker success 100.0% -> 99.3%  (sd 1.2)   blue return -113 -> -154
+    stage 1-3   attacker success 100.0% -> 87.8%  (sd 4.5)   blue return -138 -> -227
+    stage 1-4   attacker success  99.7% ->  6.8%  (sd 7.6)   blue return -1315 -> -224
 
-That trade is itself a result worth reporting: as the task deepens the defender's effect
-grows, and so does the variance.
+Stage 1-2 is over in 3.4 steps and blue barely gets a turn. Stage 1-3 gives blue time but
+not *value*: red's objective is only credential theft, so the episode ends cheaply either
+way and a long defensive stand costs more than the breach it prevents -- which is why
+blue's return is worse than doing nothing at both stages.
+
+Stage 1-4 requires red to reach the pivot, about 29 steps, which is long enough for
+containment to pay for itself. That is **Phase 2**: the shallowest stage where the
+defender both has time to act and is rewarded for acting.
 
 The learning agent is ``B_dmz``, which holds layers 1 and 2 per section 4.2. The other two
 defenders are switched off so any improvement is attributable to this one agent.
@@ -77,7 +79,7 @@ SCRIPTED_RED = AgentConfig(learning=False, policy=Policy.SCRIPTED)
 DISABLED = AgentConfig(enabled=False)
 
 
-STAGE = 3   # layers 1-3; see the module docstring for why not 1-2
+STAGE = 4   # layers 1-4; see the module docstring for why not 1-2 or 1-3
 
 
 def scenario(blue: AgentConfig, seed: int = 1, max_layer: int = STAGE) -> ScenarioConfig:
@@ -142,6 +144,8 @@ def main() -> None:
                         help="repeat over this many seeds and report mean +- sd")
     parser.add_argument("--stage", type=int, default=STAGE,
                         help="deepest active layer (curriculum stage)")
+    parser.add_argument("--q-init", type=float, default=0.0, dest="q_init",
+                        help="initial Q value; see agents/tabular.py on why it matters")
     parser.add_argument("--decay", type=float, default=0.25,
                         help="fraction of training over which epsilon decays")
     args = parser.parse_args()
@@ -160,6 +164,7 @@ def main() -> None:
             alpha=0.1, gamma=0.95,
             epsilon_start=1.0, epsilon_end=0.05,
             epsilon_decay_episodes=max(1, int(episodes * args.decay)),
+            q_init=args.q_init,
         )
 
     # Extra seeds, reported as a spread. See the module docstring on why one run is not
@@ -197,8 +202,11 @@ def main() -> None:
           f"  blue return {trained['blue_return']:9.1f}"
           f"  FP {trained['false_positives']:5.2f}")
 
-    coverage = run.controllers[LEARNER].learner.coverage
-    print(f"\nstate-space coverage: {coverage:.1%}")
+    learner = run.controllers[LEARNER].learner
+    coverage = learner.coverage
+    print(f"\nstate-space coverage: {coverage:.1%}"
+          f"   greedy picks a never-updated action in "
+          f"{learner.untried_greedy_fraction:.0%} of visited states")
 
     if repeats:
         import statistics

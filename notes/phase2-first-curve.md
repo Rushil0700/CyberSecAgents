@@ -222,23 +222,28 @@ journey.
 With the stages finally graded, the choice is measurable. Four seeds per stage, 4,000
 episodes, `B_dmz` learning and the other two defenders switched off:
 
-| Phase 2 task | Static baseline | Learned defender | sd | Blue return |
-|---|---|---|---|---|
-| stage 1–2 | 100% | 95.0% | 3.0 | −13.4 → −3.3 |
-| **stage 1–3** | 100% | **73.4%** | **8.3** | −38.2 → −8.0 |
-| stage 1–4 | 99.7% | **15.0%** | **21.8** | −1,215 → −280 |
+Four seeds per stage, 4,000 episodes, `B_dmz` learning and the other two defenders off:
 
-Stage 1–2 is **too shallow to contain a defensive decision** — red reaches its objective
-in 3.7 steps and the defender barely gets a turn, so training moves attacker success only
-from 100% to 95%. Stage 1–4 produces the largest effect but one seed in four fails
-outright (0%, 52%, 8%, 0%).
+| Phase 2 task | Attacker success | sd | Blue return |
+|---|---|---|---|
+| stage 1–2 | 100% → 99.3% | 1.2 | −113.4 → −153.8 *(worse)* |
+| stage 1–3 | 100% → 87.8% | 4.5 | −138.2 → −227.3 *(worse)* |
+| **stage 1–4** | **99.7% → 6.8%** | **7.6** | **−1,314.9 → −223.7** *(5.9× better)* |
 
-So Phase 2 runs at **stage 1–3**: the shallowest stage in which the defender has time to
-act, and the one that reproduces across seeds.
+**Stage 1–4 is Phase 2.** It is the shallowest stage where the defender both has time to
+act *and* where preventing the breach is worth more than the cost of the stand.
 
-> **The trade is itself a result.** As the task deepens, the defender's effect grows and
-> so does the variance. That is worth a figure in the report, and it is the empirical
-> reason the later phases need the curriculum rather than jumping to the full stack.
+- Stage 1–2 is **too shallow to contain a defensive decision** — red reaches its objective
+  in 3.4 steps and blue barely gets a turn.
+- Stage 1–3 gives blue time but not *value*: red's objective is only credential theft, so
+  the episode ends cheaply either way, and a long defensive stand costs more than the
+  breach it prevents.
+- Stage 1–4 requires red to reach the pivot (~29 steps), which is long enough for
+  containment to pay for itself.
+
+> **An earlier version of this table was wrong** and said stage 1–3 was the right choice
+> at 73.4%. Those numbers were measured with the termination-ordering bug in §2.5 — no
+> stage win was being paid, so nothing meant what it appeared to. The lesson is in §2.5.
 
 ### 3.3 Prevention cannot be free
 
@@ -247,6 +252,35 @@ nothing. A preventive control that is both free and effective strictly dominates
 would blanket-block its zone and §5.3's tradeoff would have nothing left to trade.
 Blocking now costs −0.5 per host per step, calibrated so covering all four Edge/DMZ hosts
 costs about the same as one isolation. Blue has to choose *where* to spend prevention.
+
+### 3.4 Initialising the Q-table at zero is not neutral
+
+Not a spec correction — a correction to my own code, and the one with the widest reach.
+
+Almost every return here is large and negative: a defender's episode return is around
+−150, a bad one −2,500. Initialising every Q-entry at 0.0 therefore hands **every untried
+action an optimism bonus of roughly +150** over the true value of the best known one.
+
+During training that is a feature — it is textbook *optimistic initialisation*, giving
+systematic exploration on top of ε-greedy for free. At evaluation it is a disaster:
+
+| After 4,000 episodes at stage 1–3 | |
+|---|---|
+| State coverage | 14.6% |
+| Visited states whose greedy action was **never updated** | **91%** |
+| Share of all decisions (visit-weighted) | **68%** |
+| Learned `Q(noop)` in the most-visited state | −149.7 |
+
+The greedy policy was, in effect, *"always try something you have never tried"*. That
+single fact explains two results that made no sense on their own:
+
+1. **The trained defender scored worse than always choosing `noop`.** `noop` has an
+   accurate, very negative learned value; an untried action looks like 0.
+2. **Greedy scored worse than ε = 0.05.** Exploration occasionally picked an action whose
+   value the agent actually knew.
+
+`q_init` is now an explicit hyperparameter, with the diagnostic that found it
+(`untried_greedy_fraction`) next to it.
 
 ---
 
