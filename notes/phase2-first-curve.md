@@ -63,10 +63,12 @@ that for free.
 
 ---
 
-## 2. Five defects, and how each was found
+## 2. Six defects, and how each was found
 
-This is the most useful section for a viva, because none of these five crashed. Four were
-found by **measuring**, not by testing.
+This is the most useful section for a viva, because **none of these six crashed**. One was
+caught by a unit test, one by reading the code, and four by *measuring* — which is the
+point: in RL a broken environment does not fail, it produces a plausible curve for a
+different problem.
 
 ### 2.1 `GREEDY_EVAL` raised on first use — *found by a unit test*
 
@@ -136,7 +138,7 @@ defending.** Same fix: the first fall of a layer pays, a re-breach does not.
 > each number looks in isolation. This is §15's "careless shaping → degenerate policy",
 > and it is worth checking every per-event reward for it.
 
-### 2.6 Blue could have denied the stage win forever — *found by reading the code*
+### 2.5 Blue could have denied the stage win forever — *found by reading the code*
 
 `objective_met()` tested the layers red *currently* holds breached, and
 `tighten_ratelimit` removes a layer from that set. So at stage 1–4 blue could repair Layer
@@ -151,9 +153,9 @@ the monotone `paid_breaches`. Repairing a layer still sets red back in every way
 matters — red must breach it again to keep moving — it just cannot erase an objective
 already reached.
 
-### 2.5 A curriculum stage win paid nothing — *found by disbelieving a baseline*
+### 2.6 A curriculum stage win paid nothing — *found by disbelieving a baseline*
 
-The most instructive of the five, because it spent an afternoon disguised as a different
+The most instructive of the six, because it spent a long time disguised as a different
 problem.
 
 Symptom: at stage 1–3 the trained defender's return (−142.8) was **worse than switching
