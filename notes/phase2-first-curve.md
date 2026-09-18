@@ -322,24 +322,35 @@ being wrong.
 > reporting the initial value. Any evaluation of a greedy policy should check what
 > fraction of its choices are of actions it has never tried.
 
-**And an uncomfortable result worth reporting honestly.** At stage 1–4 — the Phase 2 task
-— the *optimistic* agent scores better on every metric despite the diagnostic:
+**The result that nearly went the wrong way.** At a 4,000-episode budget the *optimistic*
+agent scored better on every metric despite the diagnostic — 16.7% attacker success against
+24.8%, with 80% of its greedy choices on entries it had never updated. Taken at face value
+that says "the trap doesn't matter, keep `q_init = 0`".
 
-| `q_init` | Attacker success | sd | Blue wins | Blue return | Greedy picks never-updated action |
+It was a training-budget question wearing a hyperparameter costume. Three seeds at stage
+1–4, varying both:
+
+| Episodes | `q_init` | Attacker success | sd | Blue return | Untried-greedy |
 |---|---|---|---|---|---|
-| **0** | **16.7%** | 14.1 | **82.6%** | **−282** | **80%** |
-| −150 | 24.8% | 17.0 | 72.2% | −377 | **25%** |
+| 4,000 | 0 | 18.4% | 15.8 | −277 | 80% |
+| 4,000 | −150 | 24.7% | 19.6 | −454 | 23% |
+| 12,000 | 0 | **30.6%** | 21.6 | −676 | 77% |
+| **12,000** | **−150** | **4.3%** | **5.7** | **−171** | 29% |
 
-So the better-scoring agent is the one whose policy is *least* learned. The likely reason:
-at stage 1–4 the optimism bonus acts as an implicit bias toward *doing something rather
-than `noop`*, and aggressive containment happens to be a good policy there. Its advantage
-is partly an exploration artifact rather than learned value.
+**The ordering reverses**, and the optimistic agent *degrades* with more training. That has
+a precise cause: untried entries stay pinned at 0.0 forever while learned values become
+more accurate and therefore more negative, so the gap between them **widens** with
+training and the greedy policy prefers ignorance more and more strongly. Training harder
+makes that policy worse.
 
-The honest reading is that both agents are **undertrained** — at 14–20% state coverage the
-table is mostly empty either way, so this is a training-budget question wearing a
-hyperparameter costume. That is the first thing to resolve in Phase 3, and it is a good
-illustration of why `untried_greedy_fraction` belongs next to any reported score: without
-it, the 16.7% row looks like a straightforwardly better agent.
+The pessimistic agent wins on score, on variance (sd 5.7 against 21.6) and on having a
+policy that is actually learned. **Phase 2's configuration is `q_init = −150` at 12,000
+episodes.**
+
+> **The lesson.** A hyperparameter comparison at an inadequate budget can invert. If the
+> diagnostic and the score disagree — here, "80% of decisions are uninformed" against "but
+> it scores better" — trust the diagnostic enough to re-test at a larger budget before
+> concluding.
 
 ---
 

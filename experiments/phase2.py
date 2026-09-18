@@ -36,6 +36,24 @@ Stage 1-4 requires red to reach the pivot, about 29 steps, which is long enough 
 containment to pay for itself. That is **Phase 2**: the shallowest stage where the
 defender both has time to act and is rewarded for acting.
 
+Why q_init is -150 and why the episode budget is 12,000
+-------------------------------------------------------
+Both were settled by measurement, and the two interact. Initialising at 0.0 is optimistic
+in a regime where every return is negative, which helps exploration but means untried
+entries stay pinned at 0.0 while learned values go more negative -- so the gap *widens*
+with training and the greedy policy increasingly prefers actions it has never tried. Three
+seeds at stage 1-4:
+
+     4,000 eps, q_init    0:  attacker 18.4% (sd 15.8)  untried 80%
+     4,000 eps, q_init -150:  attacker 24.7% (sd 19.6)  untried 23%
+    12,000 eps, q_init    0:  attacker 30.6% (sd 21.6)  untried 77%   <- worse with more
+    12,000 eps, q_init -150:  attacker  4.3% (sd  5.7)  untried 29%   <- the configuration
+
+At a short budget the optimistic agent looks better; at an adequate one the ordering
+reverses and the optimistic agent actually *degrades* with further training. The
+pessimistic agent wins on score, on variance and on having a policy that is genuinely
+learned rather than a bias toward the unexplored.
+
 The learning agent is ``B_dmz``, which holds layers 1 and 2 per section 4.2. The other two
 defenders are switched off so any improvement is attributable to this one agent.
 
@@ -144,13 +162,13 @@ def main() -> None:
                         help="repeat over this many seeds and report mean +- sd")
     parser.add_argument("--stage", type=int, default=STAGE,
                         help="deepest active layer (curriculum stage)")
-    parser.add_argument("--q-init", type=float, default=0.0, dest="q_init",
+    parser.add_argument("--q-init", type=float, default=-150.0, dest="q_init",
                         help="initial Q value; see agents/tabular.py on why it matters")
-    parser.add_argument("--decay", type=float, default=0.25,
+    parser.add_argument("--decay", type=float, default=0.375,
                         help="fraction of training over which epsilon decays")
     args = parser.parse_args()
 
-    episodes = args.episodes or (800 if args.quick else 6_000)
+    episodes = args.episodes or (800 if args.quick else 12_000)
     eval_n = 100 if args.quick else 400
 
     print(f"Phase 2 -- {LEARNER} (Q-Learning) vs scripted attacker, "
