@@ -52,6 +52,13 @@ class RewardConfig:
         isolated_host_per_step: Charged per isolated host per step under PER_STEP. Applies
             to *correctly* isolated hosts too: containment should be worth taking (+50,
             and it stops the -10 bleed, netting +8 per step) but never free.
+        blocked_host_per_step: Charged per blocked host per step. Smaller than isolation,
+            because blocking restricts a host rather than removing it -- but **not zero**.
+            A preventive control that is both free and effective strictly dominates
+            everything else: blue would simply blanket-block its whole zone and the
+            section 5.3 tradeoff would have nothing left to trade. At -0.5, covering all
+            four Edge/DMZ hosts costs about as much as one isolation, so blue has to
+            choose *where* to spend prevention rather than applying it everywhere.
         honeypot_engagement: Blue's payoff when red touches a decoy.
         honeypot_cost: Red's side of the same event. Equal and opposite, deliberately.
         layer_restored: Blue repairing a breached layer -- **paid once per layer per
@@ -78,6 +85,7 @@ class RewardConfig:
     correct_isolation: float = 50.0
     false_positive: float = -20.0
     isolated_host_per_step: float = -2.0
+    blocked_host_per_step: float = -0.5
     honeypot_engagement: float = 30.0
     layer_restored: float = 25.0
 
@@ -144,8 +152,9 @@ def blue_reward(
             + 50 * (correct isolations)
             - 20 * (false positives)
             + 30 * (honeypot engagements)
-            + 25 * (layers restored)
+            + 25 * (layers restored, once each)
             -  2 * (isolated hosts)             per step, PER_STEP mode only
+            -0.5 * (blocked hosts)              per step, PER_STEP mode only
             -  1                                per step
     """
     reward = cfg.step_cost
@@ -167,6 +176,7 @@ def blue_reward(
             1 for st in state.true_status.values() if st is HostStatus.ISOLATED
         )
         reward += cfg.isolated_host_per_step * isolated
+        reward += cfg.blocked_host_per_step * state.blocked_count
 
     return reward
 

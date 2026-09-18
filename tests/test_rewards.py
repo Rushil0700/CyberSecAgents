@@ -8,6 +8,8 @@ pays, and that no action can be farmed for free reward.
 
 from __future__ import annotations
 
+import pytest
+
 from marlsoc.config import AvailabilityCost
 from marlsoc.env import rewards as rw
 from marlsoc.env.layers import Layer, LayerStatus
@@ -181,3 +183,45 @@ class TestConfigBaselines:
         from marlsoc.config import ScenarioConfig
         assert ScenarioConfig().availability_cost is AvailabilityCost.PER_STEP
         assert rw.DEFAULT.availability_cost is AvailabilityCost.PER_STEP
+
+
+class TestPreventionIsCheapButNotFree:
+    """A free, effective preventive control would strictly dominate everything else.
+
+    ``block`` stops a clean host being compromised and, unlike ``isolate``, leaves it on
+    the network. If it also cost nothing, blue's best policy would be to blanket-block
+    its whole zone every few steps -- perfect prevention at zero price -- and section
+    5.3's tradeoff would have nothing left to trade.
+    """
+
+    def test_blocking_costs_something(self) -> None:
+        assert PER_STEP.blocked_host_per_step < 0
+
+    def test_blocking_is_cheaper_than_isolating(self) -> None:
+        # It restricts a host rather than removing it, so it should not cost the same.
+        assert PER_STEP.blocked_host_per_step > PER_STEP.isolated_host_per_step
+
+    def test_blanket_prevention_costs_about_as_much_as_one_containment(self) -> None:
+        """The calibration that forces a choice: covering all four Edge/DMZ hosts is
+        roughly the price of one isolation, so blue must decide *where* to spend
+        prevention instead of spreading it everywhere."""
+        four_blocked = 4 * PER_STEP.blocked_host_per_step
+        one_isolated = PER_STEP.isolated_host_per_step
+        assert four_blocked == pytest.approx(one_isolated)
+
+    def test_the_cost_scales_with_how_much_is_blocked(self) -> None:
+        state = fresh()
+        base = rw.blue_reward(state, StepEvents(), PER_STEP)
+        state.block("mail", duration=5)
+        one = rw.blue_reward(state, StepEvents(), PER_STEP)
+        state.block("web-portal", duration=5)
+        two = rw.blue_reward(state, StepEvents(), PER_STEP)
+        assert one - base == pytest.approx(-0.5)
+        assert two - one == pytest.approx(-0.5)
+
+    def test_an_expired_block_stops_costing(self) -> None:
+        state = fresh()
+        state.block("mail", duration=3)
+        assert state.blocked_count == 1
+        state.step = 99
+        assert state.blocked_count == 0

@@ -287,6 +287,28 @@ class LayerStatus:
         """
         return all(self.is_satisfied(ly) for ly in WIN_REQUIRES)
 
+    def objective_met(self) -> bool:
+        """Whether red has achieved **this stage's** objective.
+
+        PROJECT.md section 7.4's stage table says stage 1 (layers 1-2) should teach red
+        to "get a foothold in the DMZ". Requiring the crown jewel at every stage does not
+        do that: switching off layers 3-6 removes the obstacles but leaves the same
+        full-length journey, so a "shallow" stage is not shallow -- it is the whole
+        network with the defences turned off, which is *easier for red*, the opposite of
+        a curriculum.
+
+        So a stage's objective is to breach every **active** layer. At stage 1 that is
+        exactly a DMZ foothold, which is what section 7.4 asks for.
+
+        Layer 6 is the exception, and for a real reason rather than a special case:
+        ``alter_credentials`` is the move Layer 6 guards, so when Layer 6 is in play
+        breaching it is not the objective -- executing the move it was protecting is.
+        The environment checks that separately.
+        """
+        if Layer.APPROVAL in self.active:
+            return False   # the full game ends on alter_credentials, not on a layer
+        return self.active <= self.breached
+
     @property
     def depth(self) -> int:
         """How many layers red has broken -- the section 9 "layers breached" metric.

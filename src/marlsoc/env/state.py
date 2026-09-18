@@ -271,6 +271,11 @@ class EpisodeState:
     def is_blocked(self, host: str) -> bool:
         return self.blocked_until.get(host, -1) > self.step
 
+    @property
+    def blocked_count(self) -> int:
+        """Hosts currently under an active block -- the availability cost of prevention."""
+        return sum(1 for host in self.blocked_until if self.is_blocked(host))
+
     def mark_detected(self) -> None:
         """A truly compromised host has been flagged. Stamps MTTD once."""
         if self.detected_step is None:
