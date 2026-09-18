@@ -287,8 +287,16 @@ class LayerStatus:
         """
         return all(self.is_satisfied(ly) for ly in WIN_REQUIRES)
 
-    def objective_met(self) -> bool:
+    def objective_met(self, ever_breached: frozenset[Layer] | set[Layer] | None = None) -> bool:
         """Whether red has achieved **this stage's** objective.
+
+        Args:
+            ever_breached: Layers red has broken at any point this episode. Defaults to
+                the currently-breached set, but the caller should pass the monotone one
+                (``EpisodeState.paid_breaches``). A stage objective is an *achievement*,
+                not a state red has to hold: testing the current set would let blue deny
+                the win forever by repairing one layer each time red completed the set,
+                which is the reward-farm loop again with the reward removed.
 
         PROJECT.md section 7.4's stage table says stage 1 (layers 1-2) should teach red
         to "get a foothold in the DMZ". Requiring the crown jewel at every stage does not
@@ -307,7 +315,8 @@ class LayerStatus:
         """
         if Layer.APPROVAL in self.active:
             return False   # the full game ends on alter_credentials, not on a layer
-        return self.active <= self.breached
+        reached = self.breached if ever_breached is None else frozenset(ever_breached)
+        return self.active <= reached
 
     @property
     def depth(self) -> int:

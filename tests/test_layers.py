@@ -182,3 +182,35 @@ class TestDepthMetric:
                    Layer.SEGMENTATION, Layer.PRIVILEGE, Layer.APPROVAL):
             status = status.breach(ly)
         assert status.depth == 6
+
+
+class TestTheStageObjectiveIsAnAchievement:
+    """A stage objective must be monotone, or blue can deny it forever.
+
+    ``tighten_ratelimit`` removes a layer from ``breached``. If the objective tested the
+    *current* breached set, blue could repair one layer each time red completed the set
+    and the stage win would never fire -- the reward-farm loop again with the reward taken
+    out. Red's progress is therefore measured against the layers it has breached at any
+    point, which never shrinks.
+    """
+
+    def test_repairing_a_layer_cannot_take_the_objective_away(self) -> None:
+        stage = LayerStatus.for_stage(2)
+        stage = stage.breach(Layer.PERIMETER).breach(Layer.DMZ_BOUNDARY)
+        assert stage.objective_met(stage.breached)
+
+        repaired = stage.restore(Layer.PERIMETER)
+        assert not repaired.objective_met()                       # current set: denied
+        assert repaired.objective_met({Layer.PERIMETER, Layer.DMZ_BOUNDARY})   # monotone
+
+    def test_the_full_game_never_ends_on_a_layer(self) -> None:
+        """When Layer 6 is active the objective is executing alter_credentials, which is
+        the move Layer 6 guards -- not breaching a layer."""
+        full = LayerStatus.full()
+        for layer in Layer:
+            full = full.breach(layer)
+        assert not full.objective_met(full.breached)
+
+    def test_a_partial_stage_is_not_met(self) -> None:
+        stage = LayerStatus.for_stage(3).breach(Layer.PERIMETER)
+        assert not stage.objective_met(stage.breached)

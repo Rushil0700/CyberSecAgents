@@ -428,7 +428,7 @@ class MiniCorp:
         # A curriculum stage ends when red has breached every layer that stage activates.
         # See LayerStatus.objective_met: without this, switching layers off does not make
         # a stage shallower, it just removes the obstacles from the same long path.
-        if state.layers.objective_met():
+        if state.layers.objective_met(state.paid_breaches):
             state.outcome = Outcome.RED_WIN
             events.red_won = True
             return True
