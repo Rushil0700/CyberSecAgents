@@ -16,6 +16,29 @@ experiments/inspect_policy.py   decode a Q-table into a readable policy
 
 ---
 
+## 0. The result
+
+`experiments/phase2.py` — `B_dmz` learning Q-Learning against a scripted attacker at
+curriculum stage 1–4, 12,000 episodes, three seeds.
+
+| Policy (§9) | Attacker success | Blue return | False positives |
+|---|---|---|---|
+| static firewall (baseline 2) | 100.0% | −1,105.9 | 0.00 |
+| random defender (baseline 1) | 11.2% | −934.1 | 2.67 |
+| greedy heuristic (baseline 3) | 78.8% | −711.7 | 0.04 |
+| **learned `B_dmz`** | **4.2%** (sd 5.4) | **−398.1** | 1.44 |
+
+**Attacker success 100% → 4.2%; blue return 2.8× better than the hardened-but-static
+network.** Against the random defender the comparison is the §5.3 tradeoff in one line:
+comparable security, but a **2.3× better return with half the false positives** — the
+random defender buys its security by isolating indiscriminately (2.67 false positives an
+episode against 1.44) and pays for it in availability.
+
+Reproduce with `python experiments/phase2.py`. Everything under `artifacts/` is
+regenerable from the seed, which is why it is not committed.
+
+---
+
 ## 1. The three algorithms are one update
 
 ```

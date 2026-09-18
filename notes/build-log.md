@@ -75,8 +75,8 @@ rather than cited, and it is why red gets SARSA. Plus a scripted opponent, the t
 loop, metrics/CSV, plotting, a policy inspector, and `experiments/phase2.py`.
 
 Headline: at curriculum stage 1-4, a single learned `B_dmz` takes attacker success from
-**99.7% to 16.7%** (sd 14.1 over four seeds) and blue's return from **-1,315 to -282**,
-winning 82.6% of episodes outright.
+**100% to 4.2%** (sd 5.4 over three seeds) and blue's return from **-1,106 to -398**,
+with half the false positives of the random defender at comparable security.
 
 The twin also got 2.6× faster (1,764 → 4,509 episodes/minute) after profiling put half
 the runtime in `legal_mask`.

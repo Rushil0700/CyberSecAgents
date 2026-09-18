@@ -218,12 +218,14 @@ plots; policy inspector; `experiments/phase2.py`. 260 tests. Write-up:
 `notes/phase2-first-curve.md`.
 
 Headline: at curriculum stage 1–4 a single learned `B_dmz` takes attacker success from
-**99.7% to 16.7%** (sd 14.1 over four seeds) and blue's return from **−1,315 to −282**,
-winning 82.6% of episodes outright.
+**100% to 4.2%** (sd 5.4 over three seeds) and blue's return from **−1,106 to −398**. It
+also beats the random defender on availability at comparable security — 1.44 false
+positives an episode against 2.67 — which is §5.3's tradeoff in one line.
 
-That figure read 6.8% until the denial loop in §3.16 was closed — some of the apparent
-defence was blue repairing Layer 1 so red's objective never registered. Any headline
-number should be re-measured after an environment change, not carried forward.
+Configuration, all of it settled by measurement: stage 1–4, `q_init = −150`, 12,000
+episodes, ε decaying over 37.5%. Earlier drafts of this number read 6.8% and then 16.7%;
+both were measured before an environment fix. **Re-measure a headline after any
+environment change — never carry it forward.**
 
 ### 3.16 A stage objective is an achievement, not a state to hold (Phase 2)
 
