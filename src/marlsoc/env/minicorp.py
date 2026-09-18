@@ -189,15 +189,25 @@ class MiniCorp:
         det.decay_heat(self.state, self.detection)
         events.red_detected = self._confirmed_compromise()
 
+        # --- termination BEFORE rewards --------------------------------------------------
+        # Order matters and getting it wrong is silent. _check_termination is what sets
+        # events.red_won for a curriculum stage's objective, so computing rewards first
+        # meant a stage win paid nothing at all: red collected no +100 and blue was
+        # charged no -100. Conceding was literally free, and blue correctly learned to
+        # concede -- a static defence scored -38.6 while a trained one scored -142.8,
+        # because defending cost step time that losing did not. The bug looked exactly
+        # like a reward-design problem. Only the alter_credentials path was unaffected,
+        # since it sets red_won during action application, which is why the full
+        # six-layer game hid it.
+        self.state.step += 1
+        done = self._check_termination(events)
+
         rewards = {
             "R_scout": rw.red_reward(self.state, events, self.rewards),
             "R_breach": rw.red_reward(self.state, events, self.rewards),
         }
         blue = rw.blue_reward(self.state, events, self.rewards)
         rewards.update({a: blue for a in topo.DEFENDER_ZONES})
-
-        self.state.step += 1
-        done = self._check_termination(events)
 
         return self.observations(), rewards, done, self._info(events)
 

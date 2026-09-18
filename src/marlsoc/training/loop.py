@@ -23,7 +23,7 @@ using different transition sequences and the section 7.2 comparison becomes mean
 
 Design note -- **the training curve and the policy-quality curve are different curves.**
 The obvious learning curve plots the return collected *while training*. For this project
-that curve is misleading, and measurably so. Eight of ``B_dmz``'s eleven actions are
+that curve is misleading, and measurably so. Eight of ``B_dmz``'s ten actions are
 ``block`` or ``isolate``, so even at epsilon = 0.05 the agent takes roughly a dozen
 expensive random containments per 250-step episode. Measured over 3,000 episodes, online
 return got *worse* (-365 to -622) while the greedy policy it had learned was far better

@@ -11,16 +11,31 @@ CSV, and the curve PNGs.
 What this experiment is
 -----------------------
 PROJECT.md section 12 specifies Phase 2 as "single blue agent, Q-Learning, vs scripted
-attacker, layers 1-2 only". The last clause needs a correction, established by
-measurement rather than argument (see ``notes/phase2-first-curve.md``): **deactivating
-layers 3-6 makes the attacker stronger, not the task shallower**, because the layers are
-what stand in red's way. Measured over 3,000 episodes, the same defender that holds red
-to a 35.7% win rate with all six layers active is beaten 82.7% of the time with layers
-3-6 switched off -- red simply walks past the DMZ and the defender cannot follow.
+attacker, layers 1-2 only". Two corrections, both established by measurement rather than
+argument (see ``notes/phase2-first-curve.md``).
 
-So Phase 2 keeps all six layers and trains the agent that **holds** layers 1 and 2 --
-``B_dmz``, per section 4.2. That is the shallow version in the sense that matters: one
-agent, one zone, a fixed opponent, and a stationary MDP.
+**A stage must end at its own objective.** Originally, switching layers 3-6 off removed
+the obstacles but left red the same full-length journey to the crown jewel, so a "shallow"
+stage was the whole network with its defences disabled -- easier for red, not shallower.
+A stage's objective is now to breach every *active* layer, which is what section 7.4's
+stage table actually describes.
+
+**Stage 1-2 is too shallow to contain a defensive decision.** Once stages were graded
+properly, a scripted attacker reaches the stage 1-2 objective in 3.7 steps: blue barely
+gets a turn, and a trained defender moves attacker success only from 100% to 95%. So
+Phase 2 uses **stage 1-3** -- the shallowest stage in which the defender has time to act.
+Measured over four seeds:
+
+    stage 1-2   attacker success 100% -> 95.0%  (sd  3.0)   too fast to defend
+    stage 1-3   attacker success 100% -> 73.4%  (sd  8.3)   <- Phase 2
+    stage 1-4   attacker success 100% -> 15.0%  (sd 21.8)   bigger effect, one seed in
+                                                             four fails outright
+
+That trade is itself a result worth reporting: as the task deepens the defender's effect
+grows, and so does the variance.
+
+The learning agent is ``B_dmz``, which holds layers 1 and 2 per section 4.2. The other two
+defenders are switched off so any improvement is attributable to this one agent.
 
 The baselines it is measured against are section 9's, and none of them is separate code
 -- each is a different setting of CLAUDE.md 3.7's three switches.
@@ -62,7 +77,10 @@ SCRIPTED_RED = AgentConfig(learning=False, policy=Policy.SCRIPTED)
 DISABLED = AgentConfig(enabled=False)
 
 
-def scenario(blue: AgentConfig, seed: int = 1) -> ScenarioConfig:
+STAGE = 3   # layers 1-3; see the module docstring for why not 1-2
+
+
+def scenario(blue: AgentConfig, seed: int = 1, max_layer: int = STAGE) -> ScenarioConfig:
     """One learning defender, a scripted attacker, the other two defenders switched off.
 
     Isolating a single defender is what makes the result attributable: any improvement is
@@ -70,10 +88,10 @@ def scenario(blue: AgentConfig, seed: int = 1) -> ScenarioConfig:
     """
     agents = {"R_scout": SCRIPTED_RED, "R_breach": SCRIPTED_RED, LEARNER: blue}
     agents.update({a: DISABLED for a in ("B_dmz", "B_corp", "B_secure") if a != LEARNER})
-    return ScenarioConfig(seed=seed, max_layer=6, agents=agents)
+    return ScenarioConfig(seed=seed, max_layer=max_layer, agents=agents)
 
 
-def baselines(episodes: int) -> dict[str, MetricsLog]:
+def baselines(episodes: int, stage: int = STAGE) -> dict[str, MetricsLog]:
     """Section 9's three baselines, each a different setting of the three switches."""
     from marlsoc.env.minicorp import MiniCorp
     from marlsoc.training.loop import build_controller, run_episode
@@ -89,7 +107,7 @@ def baselines(episodes: int) -> dict[str, MetricsLog]:
 
     results: dict[str, MetricsLog] = {}
     for label, blue_cfg in configs.items():
-        sc = scenario(blue_cfg)
+        sc = scenario(blue_cfg, max_layer=stage)
         env = MiniCorp(sc)
         rng = np.random.default_rng(sc.seed)
         controllers = {a: build_controller(a, sc.for_agent(a), rng) for a in ALL_AGENTS}
@@ -120,16 +138,19 @@ def main() -> None:
     parser.add_argument("--quick", action="store_true", help="short smoke run")
     parser.add_argument("--episodes", type=int, default=None)
     parser.add_argument("--seed", type=int, default=1)
-    parser.add_argument("--seeds", type=int, default=1,
+    parser.add_argument("--seeds", type=int, default=4,
                         help="repeat over this many seeds and report mean +- sd")
-    parser.add_argument("--decay", type=float, default=0.35,
+    parser.add_argument("--stage", type=int, default=STAGE,
+                        help="deepest active layer (curriculum stage)")
+    parser.add_argument("--decay", type=float, default=0.25,
                         help="fraction of training over which epsilon decays")
     args = parser.parse_args()
 
     episodes = args.episodes or (800 if args.quick else 6_000)
     eval_n = 100 if args.quick else 400
 
-    print(f"Phase 2 -- {LEARNER} (Q-Learning) vs scripted attacker, all six layers")
+    print(f"Phase 2 -- {LEARNER} (Q-Learning) vs scripted attacker, "
+          f"curriculum stage layers 1-{args.stage}")
     print(f"{episodes} episodes, epsilon decays over {args.decay:.0%} of training, "
           f"{args.seeds} seed(s) from {args.seed}\n")
 
@@ -145,7 +166,7 @@ def main() -> None:
     # evidence for this configuration.
     repeats: list[float] = []
     for extra in range(1, args.seeds):
-        sc_extra = scenario(AgentConfig(), seed=args.seed + extra)
+        sc_extra = scenario(AgentConfig(), seed=args.seed + extra, max_layer=args.stage)
         run_extra = train(sc_extra, episodes, learner_config(), verbose=False,
                           eval_every=0)
         rate = evaluate(sc_extra, run_extra.controllers, eval_n).rate("red_win")
@@ -153,7 +174,7 @@ def main() -> None:
         print(f"  seed {args.seed + extra}: attacker success {rate:.1%}")
 
     learner_cfg = learner_config()
-    sc = scenario(AgentConfig(), seed=args.seed)
+    sc = scenario(AgentConfig(), seed=args.seed, max_layer=args.stage)
     run = train(
         sc, episodes, learner_cfg,
         phase="phase2", learner_name=LEARNER,
@@ -163,7 +184,7 @@ def main() -> None:
     )
 
     print("\nBaselines (section 9):")
-    rows = [report(label, log) for label, log in baselines(eval_n).items()]
+    rows = [report(label, log) for label, log in baselines(eval_n, args.stage).items()]
     for row in rows:
         print(f"  {row['policy']:<18} attacker success {row['attacker_success']:6.1%}"
               f"  blue return {row['blue_return']:9.1f}"

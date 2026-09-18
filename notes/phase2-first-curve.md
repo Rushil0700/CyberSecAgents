@@ -172,6 +172,29 @@ defence:
 Before the fix every stage took about the same time, because every stage was the same
 journey.
 
+### 3.2b Which stage Phase 2 should actually use
+
+With the stages finally graded, the choice is measurable. Four seeds per stage, 4,000
+episodes, `B_dmz` learning and the other two defenders switched off:
+
+| Phase 2 task | Static baseline | Learned defender | sd | Blue return |
+|---|---|---|---|---|
+| stage 1–2 | 100% | 95.0% | 3.0 | −13.4 → −3.3 |
+| **stage 1–3** | 100% | **73.4%** | **8.3** | −38.2 → −8.0 |
+| stage 1–4 | 99.7% | **15.0%** | **21.8** | −1,215 → −280 |
+
+Stage 1–2 is **too shallow to contain a defensive decision** — red reaches its objective
+in 3.7 steps and the defender barely gets a turn, so training moves attacker success only
+from 100% to 95%. Stage 1–4 produces the largest effect but one seed in four fails
+outright (0%, 52%, 8%, 0%).
+
+So Phase 2 runs at **stage 1–3**: the shallowest stage in which the defender has time to
+act, and the one that reproduces across seeds.
+
+> **The trade is itself a result.** As the task deepens, the defender's effect grows and
+> so does the variance. That is worth a figure in the report, and it is the empirical
+> reason the later phases need the curriculum rather than jumping to the full stack.
+
 ### 3.3 Prevention cannot be free
 
 Once stages were genuinely shallow, `block` became the dominant action — and it cost

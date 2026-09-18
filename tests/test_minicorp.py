@@ -440,3 +440,59 @@ class TestTheLadderCannotBeFarmedEither:
                 break
         assert paid_red == 1
         assert paid_blue == 1
+
+
+class TestWinningIsAlwaysPaid:
+    """Termination must be decided before rewards, on every path to a win.
+
+    This was a real bug with no symptom of its own. ``_check_termination`` is what sets
+    ``events.red_won`` for a curriculum stage's objective, and rewards were computed
+    first -- so a stage win paid nothing: red collected no +100 and blue was charged no
+    -100. Conceding was free, and blue correctly learned to concede. A static defence
+    scored -38.6 against a trained defender's -142.8, because defending cost step time
+    that losing did not, and the whole thing read as a reward-design problem rather than
+    an ordering bug. Only ``alter_credentials`` was unaffected, because it sets
+    ``red_won`` during action application -- which is exactly why the full six-layer game
+    never showed it.
+    """
+
+    def _both_returns(self, env, joint):
+        _, rewards, done, info = env.step(joint)
+        return rewards["R_breach"], rewards["B_dmz"], done, info
+
+    def test_a_stage_objective_win_pays_both_teams(self) -> None:
+        env = MiniCorp(ScenarioConfig(seed=1, max_layer=2))
+        env.reset()
+        env.state.record_breach(Layer.PERIMETER)
+        env.state.discovered.add("web-portal")
+        # Force the second layer to fall this step by exploiting the entry host.
+        for _ in range(40):
+            if not act.is_legal(env.state, "R_breach",
+                                Action(Verb.EXPLOIT, host="web-portal")):
+                break
+            red_r, blue_r, done, info = self._both_returns(
+                env, {"R_breach": Action(Verb.EXPLOIT, host="web-portal")})
+            if done:
+                assert info["outcome"] == "red_win"
+                assert red_r > 0, "red won a stage and was paid nothing"
+                assert blue_r < -50, "blue lost a stage and was charged nothing"
+                return
+        raise AssertionError("red never reached the stage objective")
+
+    def test_the_full_game_win_still_pays(self) -> None:
+        env = MiniCorp()
+        env.reset()
+        for layer in Layer:
+            env.state.record_breach(layer)
+        env.state.compromise(topo.CROWN_JEWEL)
+        _, rewards, done, info = env.step({"R_breach": Action(Verb.ALTER_CREDENTIALS)})
+        assert done and info["outcome"] == "red_win"
+        assert rewards["R_breach"] > 0
+        assert rewards["B_dmz"] < -50
+
+    def test_conceding_is_not_cheaper_than_defending(self) -> None:
+        """The property the bug violated: losing must cost more than the step time of
+        trying to prevent it, or the optimal defensive policy is to concede."""
+        from marlsoc.env import rewards as rw
+        # Losing costs -100 at once; a defence that drags the episode out pays -1 a step.
+        assert rw.DEFAULT.red_win > abs(rw.DEFAULT.step_cost) * 60
