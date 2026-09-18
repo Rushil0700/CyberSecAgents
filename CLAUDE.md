@@ -218,7 +218,20 @@ plots; policy inspector; `experiments/phase2.py`. 260 tests. Write-up:
 `notes/phase2-first-curve.md`.
 
 Headline: at curriculum stage 1–4 a single learned `B_dmz` takes attacker success from
-**99.7% to 6.8%** (sd 7.6 over four seeds) and blue's return from **−1,315 to −224**.
+**99.7% to 16.7%** (sd 14.1 over four seeds) and blue's return from **−1,315 to −282**,
+winning 82.6% of episodes outright.
+
+That figure read 6.8% until the denial loop in §3.16 was closed — some of the apparent
+defence was blue repairing Layer 1 so red's objective never registered. Any headline
+number should be re-measured after an environment change, not carried forward.
+
+### 3.16 A stage objective is an achievement, not a state to hold (Phase 2)
+
+`objective_met` tested the currently-breached set, and `tighten_ratelimit` removes a layer
+from it — so blue could repair Layer 1 each time red completed the set and deny the win
+forever. It is now measured against the monotone `paid_breaches`. This was the third
+appearance of the same repair loop: first farming +25, then farming red's ladder, then
+denying termination.
 
 ### 3.12 A curriculum stage ends at its own objective (Phase 2)
 

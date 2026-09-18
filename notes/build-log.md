@@ -75,12 +75,13 @@ rather than cited, and it is why red gets SARSA. Plus a scripted opponent, the t
 loop, metrics/CSV, plotting, a policy inspector, and `experiments/phase2.py`.
 
 Headline: at curriculum stage 1-4, a single learned `B_dmz` takes attacker success from
-**99.7% to 6.8%** (sd 7.6 over four seeds) and blue's return from **-1,315 to -224**.
+**99.7% to 16.7%** (sd 14.1 over four seeds) and blue's return from **-1,315 to -282**,
+winning 82.6% of episodes outright.
 
 The twin also got 2.6× faster (1,764 → 4,509 episodes/minute) after profiling put half
 the runtime in `legal_mask`.
 
-**Six defects, five of them found by measuring rather than by testing.** Full write-up in
+**Six defects, four of them found by measuring rather than by testing.** Full write-up in
 `notes/phase2-first-curve.md`; the two worth remembering:
 
 - **Blue farmed the shaping reward.** `tighten_ratelimit` was the greedy action in 93.9%

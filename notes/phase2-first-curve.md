@@ -245,7 +245,11 @@ Four seeds per stage, 4,000 episodes, `B_dmz` learning and the other two defende
 |---|---|---|---|
 | stage 1–2 | 100% → 99.3% | 1.2 | −113.4 → −153.8 *(worse)* |
 | stage 1–3 | 100% → 87.8% | 4.5 | −138.2 → −227.3 *(worse)* |
-| **stage 1–4** | **99.7% → 6.8%** | **7.6** | **−1,314.9 → −223.7** *(5.9× better)* |
+| **stage 1–4** | **99.7% → 16.7%** | **14.1** | **−1,314.9 → −282.2** *(4.7× better)* |
+
+*(The stage 1–4 row was 6.8% before the denial loop in §2.5 was closed. Some of that
+apparent defence was blue repairing Layer 1 to stop red's objective ever registering,
+rather than actually containing the attacker. 16.7% is the honest number.)*
 
 **Stage 1–4 is Phase 2.** It is the shallowest stage where the defender both has time to
 act *and* where preventing the breach is worth more than the cost of the stand.
