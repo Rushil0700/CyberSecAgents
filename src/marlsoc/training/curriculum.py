@@ -72,6 +72,18 @@ class CurriculumConfig:
             information about the later stages at all -- better to reach stage 5 badly
             than to spend 50,000 episodes failing stage 3. A forced promotion is recorded
             so it can never be mistaken for a real one.
+
+            ``None`` -- the default -- means **share the remaining budget evenly between
+            the remaining stages**, which is the only setting that guarantees the
+            curriculum traverses every stage. A fixed number cannot: it has to be chosen
+            against a training budget it does not know, and 8,000 against a 9,000-episode
+            run can fire exactly once. Measured with the old default, red against a
+            trained defender reached stage 3, spent 4,885 of its 9,000 episodes there
+            winning 2.3%, and was then evaluated at a depth it had never trained at.
+
+            The dynamic cap also self-corrects: a stage cleared quickly hands its unused
+            episodes to the stages after it, which is what you want, because the deep
+            stages are the expensive ones.
     """
 
     stages: tuple[int, ...] = STAGES
@@ -79,7 +91,7 @@ class CurriculumConfig:
     promote_window: int = 200
     min_episodes_per_stage: int = 600
     epsilon_on_promote: float | None = 0.40
-    max_episodes_per_stage: int = 8_000
+    max_episodes_per_stage: int | None = None
 
 
 @dataclass
@@ -105,6 +117,7 @@ class Curriculum:
     """
 
     config: CurriculumConfig = field(default_factory=CurriculumConfig)
+    total_episodes: int | None = None
     index: int = 0
     episodes_at_stage: int = 0
     transitions: list[StageTransition] = field(default_factory=list)
@@ -152,7 +165,7 @@ class Curriculum:
         if self.finished:
             return None
 
-        forced = self.episodes_at_stage >= self.config.max_episodes_per_stage
+        forced = self.episodes_at_stage >= self._stage_cap(episode)
         ready = (
             self.episodes_at_stage >= self.config.min_episodes_per_stage
             and len(self._recent) >= self.config.promote_window
@@ -173,6 +186,28 @@ class Curriculum:
         self._recent.clear()
         self.transitions.append(transition)
         return transition
+
+    # ----------------------------------------------------------------------------------
+    def _stage_cap(self, episode: int) -> float:
+        """Episodes this stage may consume before it is force-promoted.
+
+        An explicit ``max_episodes_per_stage`` wins. Otherwise the remaining budget is
+        split evenly across the remaining stages, so the curriculum always reaches the
+        last one. Recomputed every episode rather than fixed at stage entry, so the cap
+        tightens as the run is used up instead of over-committing to a stage red is
+        plainly not clearing.
+        """
+        if self.config.max_episodes_per_stage is not None:
+            return self.config.max_episodes_per_stage
+        if self.total_episodes is None:
+            return float("inf")
+        remaining_stages = max(1, len(self.config.stages) - self.index)
+        remaining = max(1, self.total_episodes - episode)
+        share = remaining / remaining_stages
+        # Never force-promote before the dwell time: an untrained stage promoted early
+        # arrives at the next one with a Q-table of noise, which is the failure the
+        # min_episodes_per_stage design note describes.
+        return max(self.config.min_episodes_per_stage, share)
 
     # ----------------------------------------------------------------------------------
     def summary(self) -> str:

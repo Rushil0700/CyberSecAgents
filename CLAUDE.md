@@ -338,6 +338,47 @@ the value we wanted. The environment now builds its `RewardConfig` from the scen
 **Assert that a config option reaches the thing it configures** — an option that is merely
 read is not an option that is applied.
 
+### 3.21 A promotion threshold is relative to an opponent (Phase 3)
+
+Section 7.4 promotes a curriculum stage at a **0.70 absolute win rate**. That number was
+calibrated against a static defence, where red wins ~100%. Against the trained Phase 2
+defender even the scripted expert manages 11%, so the threshold is unreachable by
+construction — and `max_episodes_per_stage = 8000` could not rescue it, because an absolute
+cap has to be guessed against a training budget it does not know and 8,000 against a
+9,000-episode run fires at most once.
+
+Measured: red reached stage 3, spent **4,885 of its 9,000 episodes** there winning 2.3%,
+and was then evaluated at stage 5 — a depth it had **never once trained at**. Nothing
+errored. The agent simply looked incapable, and the depth of ~2.5 it reached was a
+faithful execution of the four-layer policy it had actually been taught.
+
+The stage cap is now **a share of the remaining budget over the remaining stages**,
+recomputed per episode, which guarantees traversal and lets an easy stage donate its
+unused episodes to a hard one. `tests/test_training.py::TestTheCurriculumAlwaysTraverses`
+pins it. A forced promotion is still recorded as forced — reaching stage 5 badly beats
+never seeing it, but the two must never be confused in a plot.
+
+### 3.22 Measure before theorising — three hypotheses died in one afternoon (Phase 3)
+
+Diagnosing why learned red lost to scripted red, I proposed three explanations in turn and
+each was killed by a measurement that took minutes:
+
+1. *"`q_init` is optimistic for red as it was for blue"* — killed by `untried 0%`. Red's
+   384-state space is small enough that it visits nearly all of it, so no untried entries
+   survive to evaluation. Pessimism made it strictly worse (0.4% against 4.6%).
+2. *"Red is maximising return correctly and the reward is misaligned"* — predicted learned
+   red would earn **more** return than scripted while winning less. It earned less, in both
+   shaping modes. Falsified.
+3. *"Red's observation is too aliased to represent the policy"* — the ceiling ignoring the
+   action mask is 82.6%, which looked damning, but a masked tabular agent distinguishes
+   observations whose *legal sets* differ, and the real ceiling is **97.1%**. Red's
+   observation was never the problem.
+
+The actual cause (3.21) was found by printing episodes-per-stage, which should have been
+the first thing checked. **When an agent underperforms, instrument what it did before
+theorising about why.** Every one of the three hypotheses was coherent, had a mechanism,
+and was wrong.
+
 **Phase 3 — in progress.** Red learns with the curriculum (`PROJECT.md` §7.4). Two things
 found immediately:
 

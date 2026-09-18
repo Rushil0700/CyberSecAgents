@@ -475,3 +475,53 @@ class TestCurriculumTraining:
         assert learner is not None and learner.updates > 0
         assert run.curriculum.transitions          # it did move stages
         assert learner.coverage > 0.0              # ...on one continuous table
+
+
+class TestTheCurriculumAlwaysTraverses:
+    """A stage red cannot clear must not consume the run (CLAUDE.md 3.21).
+
+    The failure this guards is silent and expensive: red reached stage 3, spent 4,885 of
+    its 9,000 episodes there winning 2.3%, and was then *evaluated at stage 5* -- a depth
+    it had never once trained at. Nothing errored; the agent simply looked incapable.
+    """
+
+    def test_an_agent_that_never_wins_still_reaches_the_last_stage(self) -> None:
+        from marlsoc.training.curriculum import Curriculum, CurriculumConfig, STAGES
+        budget = 9_000
+        c = Curriculum(CurriculumConfig(), total_episodes=budget)
+        for episode in range(budget):
+            c.record(won=False, episode=episode)
+        assert c.max_layer == STAGES[-1], "the curriculum never reached the full stack"
+        assert all(t.forced for t in c.transitions), "nothing was actually cleared"
+
+    def test_a_losing_run_spreads_itself_across_every_stage(self) -> None:
+        from marlsoc.training.curriculum import Curriculum, CurriculumConfig, STAGES
+        budget = 9_000
+        c = Curriculum(CurriculumConfig(), total_episodes=budget)
+        spent, last = [], 0
+        for episode in range(budget):
+            if c.record(won=False, episode=episode) is not None:
+                spent.append(episode - last)
+                last = episode
+        spent.append(budget - last)
+        assert len(spent) == len(STAGES), spent
+        # No stage may take more than half the run: that is the pathology itself.
+        assert max(spent) <= budget // 2, spent
+
+    def test_a_fixed_cap_is_still_honoured_when_asked_for(self) -> None:
+        from marlsoc.training.curriculum import Curriculum, CurriculumConfig
+        c = Curriculum(CurriculumConfig(max_episodes_per_stage=700),
+                       total_episodes=100_000)
+        for episode in range(700):
+            t = c.record(won=False, episode=episode)
+        assert t is not None and t.forced
+
+    def test_the_dwell_time_still_wins_over_a_tight_budget(self) -> None:
+        # A budget so small the even share is below min_episodes_per_stage must not
+        # promote on episode two -- an untrained stage promoted early arrives at the next
+        # one with a Q-table of noise.
+        from marlsoc.training.curriculum import Curriculum, CurriculumConfig
+        c = Curriculum(CurriculumConfig(), total_episodes=100)
+        for episode in range(100):
+            if c.record(won=False, episode=episode) is not None:
+                raise AssertionError(f"promoted at episode {episode}, before the dwell")

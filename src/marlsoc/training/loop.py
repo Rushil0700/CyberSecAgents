@@ -459,7 +459,10 @@ def train_curriculum(
         agent: build_controller(agent, scenario.for_agent(agent), rng, learner_config)
         for agent in ALL_AGENTS
     }
-    curriculum = Curriculum(curriculum_config or CurriculumConfig())
+    # The budget is handed to the curriculum so its stage cap can be a share of what
+    # is left rather than a constant guessed against an unknown run length.
+    curriculum = Curriculum(curriculum_config or CurriculumConfig(),
+                            total_episodes=episodes)
     log = MetricsLog()
 
     for episode in range(episodes):
