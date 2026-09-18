@@ -63,10 +63,10 @@ that for free.
 
 ---
 
-## 2. Four defects, and how each was found
+## 2. Five defects, and how each was found
 
-This is the most useful section for a viva, because none of these four crashed. Three
-were found by **measuring**, not by testing.
+This is the most useful section for a viva, because none of these five crashed. Four were
+found by **measuring**, not by testing.
 
 ### 2.1 `GREEDY_EVAL` raised on first use — *found by a unit test*
 
@@ -135,6 +135,51 @@ defending.** Same fix: the first fall of a layer pays, a re-breach does not.
 > profit from repeating one interaction, the reward function is wrong, however sensible
 > each number looks in isolation. This is §15's "careless shaping → degenerate policy",
 > and it is worth checking every per-event reward for it.
+
+### 2.5 A curriculum stage win paid nothing — *found by disbelieving a baseline*
+
+The most instructive of the five, because it spent an afternoon disguised as a different
+problem.
+
+Symptom: at stage 1–3 the trained defender's return (−142.8) was **worse than switching
+it off** (−38.6), and it did better while exploring (ε=0.37, 60.8% attacker success) than
+after converging (ε=0.05, 85%). Breaking the return down by outcome showed blue *was*
+defending — it stretched red's time-to-objective from 5.6 steps to 55.6, a 10× delay — but
+paid for the longer episode in step costs.
+
+That is a completely coherent story, and I had already drafted the fix: §5.3's −100 for an
+attacker win is one-shot, while the −1/step and −10/step bleed accumulate over T=250, so
+losing quickly is cheaper than defending. **It was wrong.**
+
+The tell was the static baseline. Red won **100%** of episodes and blue's return was only
+−38.6. If the −100 were being applied, that number had to be near −125. It wasn't being
+applied at all.
+
+The cause was ordering in `step()`. Adding the stage-objective win condition put
+`events.red_won = True` inside `_check_termination` — which ran *after* rewards were
+computed:
+
+```python
+rewards = {...}                          # computed here
+self.state.step += 1
+done = self._check_termination(events)   # sets red_won - too late
+```
+
+So **every curriculum stage's win paid nothing**: no +100 to red, no −100 to blue.
+Conceding was free, and blue learned exactly that. The agent was correct; the environment
+was lying to it.
+
+`alter_credentials` sets `red_won` during action application, so the full six-layer game
+was unaffected — which is precisely why the bug stayed hidden until Phase 2 moved to a
+shallow stage. With the ordering fixed, the arithmetic reconciles against §5.4's ladder:
+stage 1–3 pays red +10+20+30+100 = 160 less about six steps of cost, measured at **+152.8**.
+
+> **The lesson.** A plausible mechanism is not evidence. I had a coherent explanation, a
+> matching fix, and it would have made the numbers move — which would have buried the real
+> bug under a reward change. What caught it was reconciling a *baseline* against
+> arithmetic I could do by hand: 100% attacker success has to cost about −125, and it
+> didn't. **Check that your simplest configuration produces the number you can compute on
+> paper.**
 
 ---
 

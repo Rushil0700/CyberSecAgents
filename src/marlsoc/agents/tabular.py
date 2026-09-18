@@ -40,14 +40,27 @@ time. The agent would greedily take the same action forever and its only explora
 would come from epsilon. Random tie-breaking removes that positional bias, and it matters
 again later wherever a row is genuinely flat.
 
-Design note -- **zero initialisation is optimistic here, at no cost.**
-Almost every reward in this environment is negative (there is a -1 step cost on every
-step for both teams), so a visited state-action's value drifts below zero while untried
-ones remain at 0.0 -- which means untried actions look *better*. That is optimistic
-initialisation, giving systematic exploration on top of epsilon-greedy without any extra
-mechanism. Worth knowing it is happening: if the reward scale is ever changed so that
-typical returns are positive, this property silently disappears and exploration gets
-worse.
+Design note -- **initialisation is a hyperparameter, not an accident of ``np.zeros``.**
+Almost every return in this environment is large and negative -- a defender's episode
+return is around -150, and a bad one is -2500. Initialising at 0.0 therefore gives every
+untried action an optimism bonus of roughly +150 over the true value of the best known
+one. During training that is *optimistic initialisation*: useful, systematic exploration
+on top of epsilon-greedy, for free.
+
+At **evaluation** it is a disaster, and it is measurable. After 4,000 episodes at
+curriculum stage 1-3, state coverage was 14.6%, and in **91% of visited states the greedy
+action was an entry that had never once been updated** -- 68% of all decisions weighted by
+how often the states occur, against a learned ``Q(noop)`` of -149.7 in the most-visited
+state. The greedy policy was, in effect, "always try something you have never tried". That
+is why the trained defender scored *worse than always choosing noop*, and why it did
+better at epsilon = 0.05 than greedy: exploration occasionally picked an action whose
+value it actually knew.
+
+So ``q_init`` is explicit. Zero keeps the textbook optimistic behaviour. Setting it near
+the return of doing nothing makes an untried action look about as good as conceding, which
+is honest, and stops the greedy policy preferring ignorance. The right value depends on
+the reward scale, which is exactly why it should not be hidden inside a call to
+``np.zeros``.
 """
 
 from __future__ import annotations
@@ -89,6 +102,10 @@ class LearnerConfig:
             alternating training of section 6.
         epsilon_decay_episodes: Episodes over which epsilon falls from start to end.
             Geometric, so most of the exploration happens early.
+        q_init: Value every Q-entry starts at. 0.0 is optimistic in this reward regime --
+            see the module docstring for why that helps during training and hurts at
+            evaluation. Set it near the return of doing nothing to stop the greedy policy
+            preferring actions it has never tried.
     """
 
     algorithm: Algorithm = Algorithm.Q_LEARNING
@@ -97,6 +114,7 @@ class LearnerConfig:
     epsilon_start: float = 1.0
     epsilon_end: float = 0.05
     epsilon_decay_episodes: int = 3_000
+    q_init: float = 0.0
 
 
 class TabularLearner:
@@ -125,8 +143,8 @@ class TabularLearner:
         self.config = config or LearnerConfig()
         self.rng = rng if rng is not None else np.random.default_rng()
 
-        # Zero init -- optimistic in this reward regime; see the module docstring.
-        self.q = np.zeros((n_states, n_actions), dtype=np.float64)
+        # See the module docstring: this value is load-bearing, not a default.
+        self.q = np.full((n_states, n_actions), self.config.q_init, dtype=np.float64)
 
         self.episode = 0
         self.updates = 0
@@ -309,6 +327,24 @@ class TabularLearner:
     # ----------------------------------------------------------------------------------
     # Persistence and inspection
     # ----------------------------------------------------------------------------------
+    @property
+    def untried_greedy_fraction(self) -> float:
+        """Share of visited states whose greedy action has never been updated.
+
+        The diagnostic that exposed the initialisation trap. A high value means the
+        greedy policy is largely choosing by ignorance rather than by value, and any
+        evaluation of it is measuring the initialisation rather than the learning.
+        """
+        seen = np.flatnonzero(self.visits)
+        if seen.size == 0:
+            return 0.0
+        init = self.config.q_init
+        untried = sum(
+            1 for s in seen
+            if self.q[s].max() == init and self.q[s].min() < init
+        )
+        return untried / seen.size
+
     @property
     def coverage(self) -> float:
         """Fraction of the state space visited at least once.

@@ -295,3 +295,45 @@ class TestDiagnostics:
         learner(n_states=8).save(tmp_path / "q.npz")
         with pytest.raises(ValueError):
             learner(n_states=9).load(tmp_path / "q.npz")
+
+
+class TestInitialisation:
+    """``q_init`` is load-bearing in a reward regime where every return is negative.
+
+    At 0.0 every untried action carries an optimism bonus of roughly +150 over the true
+    value of the best known one. Measured after 4,000 episodes at curriculum stage 1-3:
+    coverage 14.6%, and in **91% of visited states the greedy action had never once been
+    updated** -- 68% of all decisions by visit weight, against a learned Q(noop) of
+    -149.7. The greedy policy was "always try something you have never tried", which is
+    why the trained defender scored worse than always choosing noop.
+    """
+
+    def test_the_table_starts_at_q_init(self) -> None:
+        L = learner(q_init=-42.0, n_states=4)
+        assert np.all(L.q == -42.0)
+
+    def test_zero_init_is_optimistic_when_returns_are_negative(self) -> None:
+        """The training-time benefit: untried actions outrank known-bad ones, so the
+        agent sweeps its options without needing epsilon to find them."""
+        L = learner(n_states=1, q_init=0.0, epsilon_start=0.0, epsilon_end=0.0)
+        L.q[0, 0] = -10.0          # tried, known bad
+        assert L.act(0, ALL) in (1, 2)   # both untried, both look better
+
+    def test_pessimistic_init_stops_greedy_preferring_the_unknown(self) -> None:
+        """The evaluation-time fix: a known-good action beats an untried one."""
+        L = learner(n_states=1, q_init=-200.0, epsilon_start=0.0, epsilon_end=0.0)
+        L.q[0, 0] = -10.0
+        assert L.act(0, ALL) == 0
+
+    def test_the_untried_greedy_diagnostic_detects_the_trap(self) -> None:
+        L = learner(n_states=4, q_init=0.0)
+        # One visited state where every real value has gone negative but one entry is
+        # still untouched at 0.0 -- exactly the failure mode.
+        L.q[1] = np.array([-5.0, -3.0, 0.0])
+        L.visits[1] = 10
+        assert L.untried_greedy_fraction == 1.0
+
+        L2 = learner(n_states=4, q_init=0.0)
+        L2.q[1] = np.array([-5.0, -3.0, -1.0])
+        L2.visits[1] = 10
+        assert L2.untried_greedy_fraction == 0.0
