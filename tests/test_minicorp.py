@@ -487,8 +487,23 @@ class TestWinningIsAlwaysPaid:
         env.state.compromise(topo.CROWN_JEWEL)
         _, rewards, done, info = env.step({"R_breach": Action(Verb.ALTER_CREDENTIALS)})
         assert done and info["outcome"] == "red_win"
-        assert rewards["R_breach"] > 0
         assert rewards["B_dmz"] < -50
+
+        # Red's side is isolated rather than asserted as a sign. Under potential-based
+        # shaping (CLAUDE.md 3.18) the terminal step also returns Phi(s) to zero, and a
+        # test that hand-builds a fully-breached state pays that entire clawback in one
+        # step without ever having been credited the rungs on the way up -- over a real
+        # trajectory the two cancel, but here only the debit is visible. What this test
+        # is for is 3.15, that the win is paid *at all*, so re-price the identical events
+        # with the win switched off and check the difference is exactly the win.
+        import copy
+        from marlsoc.env import layers as lyr
+        from marlsoc.env import rewards as rw
+        conceded = copy.deepcopy(info["events"])
+        conceded.red_won = False
+        assert rewards["R_breach"] - rw.red_reward(env.state, conceded) == pytest.approx(
+            lyr.ALTER_CREDENTIALS_REWARD
+        )
 
     def test_conceding_is_not_cheaper_than_defending(self) -> None:
         """The property the bug violated: losing must cost more than the step time of
@@ -496,3 +511,29 @@ class TestWinningIsAlwaysPaid:
         from marlsoc.env import rewards as rw
         # Losing costs -100 at once; a defence that drags the episode out pays -1 a step.
         assert rw.DEFAULT.red_win > abs(rw.DEFAULT.step_cost) * 60
+
+
+class TestScenarioDrivesRewards:
+    """The switches in ScenarioConfig must actually reach the reward function.
+
+    ``MiniCorp.__init__`` used to read ``reward_cfg or rw.DEFAULT``, which ignored the
+    scenario entirely: ``ScenarioConfig.availability_cost`` was dead, and CLAUDE.md 3.2's
+    ONE_SHOT before/after could not be run through a scenario at all. It went unnoticed
+    because the default was the wanted value -- the failure mode of a config switch is
+    that nothing breaks, it just quietly never applies.
+    """
+
+    def test_availability_cost_reaches_the_reward_config(self) -> None:
+        from marlsoc.config import AvailabilityCost
+        env = MiniCorp(ScenarioConfig(availability_cost=AvailabilityCost.ONE_SHOT))
+        assert env.rewards.availability_cost is AvailabilityCost.ONE_SHOT
+
+    def test_shaping_mode_reaches_the_reward_config(self) -> None:
+        from marlsoc.config import RewardShaping
+        env = MiniCorp(ScenarioConfig(shaping=RewardShaping.RAW_LADDER))
+        assert env.rewards.shaping is RewardShaping.RAW_LADDER
+
+    def test_an_explicit_reward_config_still_wins(self) -> None:
+        from marlsoc.env.rewards import RewardConfig
+        cfg = RewardConfig(red_win=7.0)
+        assert MiniCorp(ScenarioConfig(), cfg).rewards.red_win == 7.0

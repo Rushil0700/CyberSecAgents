@@ -91,7 +91,15 @@ class MiniCorp:
         detection_cfg: DetectionConfig | None = None,
     ) -> None:
         self.scenario = scenario or ScenarioConfig()
-        self.rewards = reward_cfg or rw.DEFAULT
+        # Build the reward config *from the scenario* when one is not supplied. It used
+        # to be `reward_cfg or rw.DEFAULT`, which silently ignored the scenario -- so
+        # ScenarioConfig.availability_cost was dead and CLAUDE.md 3.2's ONE_SHOT
+        # before/after could not actually be run through a scenario at all. Harmless only
+        # because the default happened to be the wanted one.
+        self.rewards = reward_cfg or rw.RewardConfig(
+            availability_cost=self.scenario.availability_cost,
+            shaping=self.scenario.shaping,
+        )
         self.detection = detection_cfg or det.DEFAULT
         self.state: EpisodeState
         self.rng: np.random.Generator
@@ -174,6 +182,10 @@ class MiniCorp:
             raise RuntimeError("episode has already terminated; call reset()")
 
         events = StepEvents()
+        # Phi(s), captured before anything moves. The shaping term needs the potential of
+        # the state we are leaving, and by the time rewards are computed the state object
+        # has already been mutated into s'.
+        events.potential_before = lyr.cumulative_breach_reward(self.state.paid_breaches)
         noise: dict[str, float] = {}
 
         for agent, action in joint_action.items():
@@ -207,6 +219,10 @@ class MiniCorp:
         # six-layer game hid it.
         self.state.step += 1
         done = self._check_termination(events)
+        # Phi(terminal) = 0 is what makes the shaping policy-invariant; the reward
+        # function cannot know it is terminal unless we say so, and we can only say so
+        # because 3.15 put the termination check ahead of the rewards.
+        events.terminal = done
 
         rewards = {
             "R_scout": rw.red_reward(self.state, events, self.rewards),

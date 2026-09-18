@@ -39,6 +39,36 @@ class AvailabilityCost(str, Enum):
     PER_STEP = "per_step"
 
 
+class RewardShaping(str, Enum):
+    """How red's progress along the section 5.4 ladder is credited. CLAUDE.md 3.18.
+
+    The ladder (+10 ... +60, one rung per layer) exists to solve the sparse-reward
+    problem section 7.4 demonstrates: red only ever sees +100 at the crown jewel, and
+    Phase 1 measured that random exploration reaches mean depth 0.78 of 6 and wins 0% of
+    the time. Dense intermediate signal is not optional.
+
+    RAW_LADDER pays each rung as a flat bonus that red **keeps**. That is not
+    potential-based shaping, and Ng, Harada & Russell (1999) prove that only
+    potential-based terms leave the optimal policy invariant -- any other shaping term
+    can change *which* policy is optimal rather than merely how fast it is found. The
+    risk here is concrete: a rung red keeps is a reward it can collect and then lose on
+    purpose, since nothing claws it back at termination.
+
+    POTENTIAL_BASED credits ``gamma * Phi(s') - Phi(s)`` instead, where ``Phi`` is the
+    cumulative ladder value of the layers red has breached and ``Phi(terminal) = 0``. The
+    discounted sum over any trajectory telescopes to ``gamma^T Phi(s_T) - Phi(s_0)``,
+    which is zero at both ends -- so the shaping shapes the *value function* and steers
+    exploration without being a destination red can settle for.
+
+    RAW_LADDER is kept deliberately, exactly as ``AvailabilityCost.ONE_SHOT`` is: the
+    before/after is what makes the change mean something rather than being an unmotivated
+    rewrite of a reward function that was in the spec.
+    """
+
+    RAW_LADDER = "raw_ladder"
+    POTENTIAL_BASED = "potential_based"
+
+
 class Policy(str, Enum):
     """How an agent chooses actions.
 
@@ -91,6 +121,7 @@ class ScenarioConfig:
     seed: int = 0
     agents: dict[str, AgentConfig] = field(default_factory=dict)
     availability_cost: AvailabilityCost = AvailabilityCost.PER_STEP
+    shaping: RewardShaping = RewardShaping.POTENTIAL_BASED
     max_layer: int = 6
     step_limit: int = 250
 

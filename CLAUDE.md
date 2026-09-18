@@ -288,6 +288,56 @@ security axis. Measured against a scripted attacker: it ends an episode with **3
 comparing security against it flatters nothing. Quote it alongside its false-positive rate
 or it reads as a stronger baseline than it is.
 
+### 3.18 Shaping rewards must be potential-based (Phase 3)
+
+Section 5.4's ladder (+10 ... +60, one rung per layer) is *reward shaping*: dense
+intermediate signal added because the +100 at the crown jewel alone is too sparse to
+learn from (Phase 1 measured random exploration at mean depth 0.78 of 6, winning 0%).
+
+Ng, Harada & Russell (1999), *Policy invariance under reward transformations*, prove that
+a shaping term leaves the optimal policy unchanged **if and only if** it is potential-
+based: `F(s, s') = γ·Φ(s') − Φ(s)` for some `Φ`, with `Φ(terminal) = 0`. Anything else can
+change which policy is optimal rather than just how fast it is found. A flat rung that red
+*keeps* is not potential-based — nothing claws it back at termination, so collecting
+shaping and then losing on purpose is a policy the reward function permits.
+
+`Φ` is now the banked ladder value and the credit is `γΦ(s') − Φ(s)`, so the discounted
+sum telescopes to `γ^T Φ(s_T) − Φ(s_0)` — zero at both ends. The shaping steers
+exploration for free and cannot be a destination. `config.RewardShaping.RAW_LADDER` keeps
+the old behaviour for the before/after, exactly as `AvailabilityCost.ONE_SHOT` does.
+
+Two consequences worth stating. `Φ` reads the **paid** breach set, not the currently-
+breached one, or blue repairing a layer would lower red's potential and hand it a fresh
+rung to re-climb — 3.13's farmable loop with an extra step in it. And `shaping_gamma` must
+match the learner's `γ`; if they drift the invariance guarantee is gone.
+
+### 3.19 Train against the opponent you intend to evaluate against (Phase 3)
+
+A diagnostic said the learned attacker was far worse than the scripted one: 3.2% against
+11.0%, at 73.3 steps against 23.3 and 0.21 detections against 0.72 — a profile of extreme,
+expensive stealth. The cause was in the harness, not the agent. The frozen defender's
+Q-table was loaded *after* training, so red had actually trained against a `GREEDY`
+controller reading a freshly-initialised table — and greedy over a flat table breaks every
+tie at random, which is the random defender, which by 3.17 plays the accidental lockdown.
+Red correctly learned never to make a sound, and was then scored against a different
+opponent entirely.
+
+**A frozen opponent must be loaded before the learner starts, not before it is measured.**
+`train` and `train_curriculum` now take a `controllers=` argument for exactly this, which
+is also what 3.4's alternating training needs. Symptom to recognise: a learned agent that
+loses to a scripted one *while* showing a coherent, well-executed policy — that is a
+policy optimised against the wrong distribution, not a failure to learn.
+
+### 3.20 A config switch fails silently by never applying (Phase 3)
+
+`MiniCorp.__init__` read `reward_cfg or rw.DEFAULT`, ignoring the scenario. So
+`ScenarioConfig.availability_cost` was dead: 3.2's ONE_SHOT before/after could not be run
+through a scenario at all, and nothing anywhere failed, because the default happened to be
+the value we wanted. The environment now builds its `RewardConfig` from the scenario, and
+`tests/test_minicorp.py::TestScenarioDrivesRewards` asserts each switch actually arrives.
+**Assert that a config option reaches the thing it configures** — an option that is merely
+read is not an option that is applied.
+
 **Phase 3 — in progress.** Red learns with the curriculum (`PROJECT.md` §7.4). Two things
 found immediately:
 

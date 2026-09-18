@@ -311,6 +311,7 @@ def train(
     episodes: int,
     learner_config: LearnerConfig | None = None,
     *,
+    controllers: dict[str, Controller] | None = None,
     phase: str = "phase2",
     learner_name: str = "B_corp",
     report_every: int = 500,
@@ -330,7 +331,7 @@ def train(
     """
     rng = np.random.default_rng(scenario.seed)
     env = MiniCorp(scenario)
-    controllers = {
+    controllers = controllers or {
         agent: build_controller(agent, scenario.for_agent(agent), rng, learner_config)
         for agent in ALL_AGENTS
     }
@@ -420,6 +421,7 @@ def train_curriculum(
     learner_config: LearnerConfig | None = None,
     curriculum_config: CurriculumConfig | None = None,
     *,
+    controllers: dict[str, Controller] | None = None,
     report_every: int = 1_000,
     verbose: bool = True,
 ) -> CurriculumRun:
@@ -440,6 +442,11 @@ def train_curriculum(
         episodes: Total training episodes across all stages.
         learner_config: Hyperparameters for every learning agent.
         curriculum_config: Promotion rules.
+        controllers: Pre-built controllers to train *instead of* fresh ones. This is how
+            CLAUDE.md 3.4's alternating training keeps each phase a stationary MDP: hand
+            in the opposing team already loaded and frozen, so the learner faces the
+            policy it will actually be evaluated against. Training against one opponent
+            and evaluating against another measures distribution shift, not learning.
         report_every: Console summary interval.
         verbose: Print progress and transitions.
 
@@ -448,7 +455,7 @@ def train_curriculum(
     """
     rng = np.random.default_rng(scenario.seed)
     env = MiniCorp(scenario)
-    controllers = {
+    controllers = controllers or {
         agent: build_controller(agent, scenario.for_agent(agent), rng, learner_config)
         for agent in ALL_AGENTS
     }

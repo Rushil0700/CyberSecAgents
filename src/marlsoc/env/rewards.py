@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Final
 
-from marlsoc.config import AvailabilityCost
+from marlsoc.config import AvailabilityCost, RewardShaping
 from marlsoc.env import layers as lyr
 from marlsoc.env.layers import Layer
 from marlsoc.env.state import EpisodeState, HostStatus
@@ -97,6 +97,12 @@ class RewardConfig:
     step_cost: float = -1.0
 
     availability_cost: AvailabilityCost = AvailabilityCost.PER_STEP
+    shaping: RewardShaping = RewardShaping.POTENTIAL_BASED
+
+    # Must match the learner's discount factor. If the two drift apart the Ng et al.
+    # invariance guarantee no longer holds -- the shaping stops being free and starts
+    # quietly re-weighting depth again, which is the bug this flag exists to fix.
+    shaping_gamma: float = 0.95
 
 
 DEFAULT: Final[RewardConfig] = RewardConfig()
@@ -133,6 +139,8 @@ class StepEvents:
     honeypot_hits: int = 0
     red_detected: bool = False
     red_won: bool = False
+    potential_before: float = 0.0
+    terminal: bool = False
 
 
 def blue_reward(
@@ -193,7 +201,7 @@ def red_reward(
     would receive almost nothing, since finding a host pays only when someone else
     exploits it much later.
 
-        R = + the section 5.4 ladder for each layer breached this step
+        R = + gamma * Phi(s') - Phi(s)     potential-based shaping over the 5.4 ladder
             + 100 [credentials altered]
             -  50 [detected]
             -  30 * (honeypot engagements)
@@ -201,8 +209,23 @@ def red_reward(
     """
     reward = cfg.step_cost
 
-    for layer in events.layers_breached:
-        reward += lyr.breach_reward(layer)
+    if cfg.shaping is RewardShaping.RAW_LADDER:
+        # PROJECT.md section 5.4 as written: a flat bonus per rung, kept. Retained so the
+        # "attacker learns to lose on purpose" result can be reproduced -- see
+        # config.RewardShaping.
+        for layer in events.layers_breached:
+            reward += lyr.breach_reward(layer)
+    else:
+        #   F(s, s') = gamma * Phi(s') - Phi(s),   Phi(terminal) = 0
+        # Ng, Harada & Russell (1999). Phi is the banked ladder value; the terminal zero
+        # is the clause that stops red treating shaping as a destination, because the
+        # discounted sum over a trajectory then telescopes to zero.
+        phi_after = (
+            0.0
+            if events.terminal
+            else lyr.cumulative_breach_reward(state.paid_breaches)
+        )
+        reward += cfg.shaping_gamma * phi_after - events.potential_before
 
     if events.red_won:
         reward += lyr.ALTER_CREDENTIALS_REWARD

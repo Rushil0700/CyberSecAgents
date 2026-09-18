@@ -53,7 +53,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Final
+from typing import Final, Iterable
 
 from marlsoc.env.topology import Role
 
@@ -332,6 +332,20 @@ class LayerStatus:
 def breach_reward(layer: Layer) -> float:
     """The section 5.4 progressive reward for breaching ``layer``."""
     return LAYERS[layer].breach_reward
+
+
+def cumulative_breach_reward(breached: Iterable[Layer]) -> float:
+    """``Phi(s)`` -- the potential function for section 5.4's shaping term.
+
+    The ladder value red has banked so far. Used by ``rewards.red_reward`` under
+    ``RewardShaping.POTENTIAL_BASED`` to form ``gamma * Phi(s') - Phi(s)``.
+
+    It is a function of the *paid* breach set rather than the currently-breached set, for
+    the same reason ``LayerStatus.objective_met`` is: blue repairing a layer must not
+    lower red's potential, or repairing would hand red a fresh rung to climb and we would
+    be back at CLAUDE.md 3.13's farmable loop with an extra step in it.
+    """
+    return sum(LAYERS[layer].breach_reward for layer in breached)
 
 
 def total_ladder() -> float:
