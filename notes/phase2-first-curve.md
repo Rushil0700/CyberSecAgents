@@ -322,6 +322,25 @@ being wrong.
 > reporting the initial value. Any evaluation of a greedy policy should check what
 > fraction of its choices are of actions it has never tried.
 
+**And an uncomfortable result worth reporting honestly.** At stage 1–4 — the Phase 2 task
+— the *optimistic* agent scores better on every metric despite the diagnostic:
+
+| `q_init` | Attacker success | sd | Blue wins | Blue return | Greedy picks never-updated action |
+|---|---|---|---|---|---|
+| **0** | **16.7%** | 14.1 | **82.6%** | **−282** | **80%** |
+| −150 | 24.8% | 17.0 | 72.2% | −377 | **25%** |
+
+So the better-scoring agent is the one whose policy is *least* learned. The likely reason:
+at stage 1–4 the optimism bonus acts as an implicit bias toward *doing something rather
+than `noop`*, and aggressive containment happens to be a good policy there. Its advantage
+is partly an exploration artifact rather than learned value.
+
+The honest reading is that both agents are **undertrained** — at 14–20% state coverage the
+table is mostly empty either way, so this is a training-budget question wearing a
+hyperparameter costume. That is the first thing to resolve in Phase 3, and it is a good
+illustration of why `untried_greedy_fraction` belongs next to any reported score: without
+it, the 16.7% row looks like a straightforwardly better agent.
+
 ---
 
 ## 4. Methodology: two things this phase had to get right
