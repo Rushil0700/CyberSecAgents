@@ -59,10 +59,22 @@ mechanism is Phase 2's `q_init` trap (§3.14) on the other team: while exploring
 stumbles past never-updated actions often enough to finish the chain; evaluated greedily,
 red picks an untried action in 85% of visited states and the policy collapses.
 
-**The promotion criterion is therefore measuring the wrong policy.** It certifies stages
-that the deployable agent cannot perform at all, which is why every transition above reads
-100% while the shipped policy scores zero. A curriculum must promote on the performance of
+**The promotion criterion was therefore measuring the wrong policy.** It certified stages
+the deployable agent could not perform at all, which is why every transition above read
+100% while the shipped policy scored zero. A curriculum must promote on the performance of
 the policy you intend to keep.
+
+This is now fixed: `CurriculumConfig.promote_on_greedy` (on by default) runs a short
+greedy evaluation at the current stage and judges promotion on *that*, and the rate stored
+on each transition is the one that actually decided it — so the sawtooth is never annotated
+with a number that had no effect. It is not free: a greedy probe costs real episodes, and
+`experiments/phase3.py` names its settings (60 evaluation episodes every 250 training ones,
+24% overhead) rather than inheriting them, so the cost is part of the run's record.
+
+Note also what this does to the numbers above. Once promotion is judged on the greedy
+policy, the shaping question of Result 5 becomes visible immediately rather than after a
+full training run — a stage that the deployable agent cannot clear simply stops promoting
+on merit, instead of promoting on merit it does not have.
 
 > **Viva question.** *Your curve shows 100% success but your agent scores 0%. Which is
 > lying?* Neither — they measure different policies. The curve is the ε-greedy policy used
