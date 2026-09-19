@@ -145,7 +145,7 @@ can represent **97.1%** of the expert policy. Red's observation was never the bo
 > could match. Naively that's 82.6%, but the agent also gets a legal-action mask, so the
 > real ceiling is 97.1%. The representation is adequate; the failures were elsewhere.
 
-## Result 5 — potential-based shaping, and the trap it opened
+## Result 5 — a correct theorem that was the wrong engineering decision
 
 §5.4's ladder (+10 … +60 per layer) is *reward shaping*: dense intermediate signal, added
 because the +100 alone is too sparse. **Ng, Harada & Russell (1999)** prove shaping leaves
@@ -167,11 +167,56 @@ Two details that matter:
   the farmable loop of Phase 2, with an extra step in it.
 - `shaping_gamma` must equal the learner's γ, or the invariance guarantee is gone.
 
-**And it opened a trap.** Under the raw ladder red's returns were ≈ +9 to +18, so
-`q_init = 0.0` was roughly neutral. Potential-based shaping moved them to ≈ −90 to −124 —
-making `q_init = 0.0` a standing **+100 optimism bonus on every untried action**. This is
-Phase 2's §3.14 trap, reappearing on the other team because a *correct* reward change moved
-the scale of returns.
+**And it does not work here, which is the most interesting result in the phase.**
+
+Zero at both ends means the shaping contributes *exactly nothing* to the discounted
+return. So red's whole incentive is the terminal +100. Work it out at γ = 0.95 over the
+~29 steps to the crown jewel:
+
+```
+terminal reward     0.95^29 × 100          = +22.6
+step costs          −(1 − 0.95^29)/0.05    = −15.5
+                                             ------
+                                             + 7.1
+one detection       −50 × 0.95^k  (k ≈ 14) ≈ −30.0
+                                             ------
+                                             −22.9     vs  −20.0 for idling 250 steps
+```
+
+**Idling wins.** And detection is *environmental* — the alert process charges −50 even
+against a static defence with every defender disabled — so there is no opponent to avoid,
+just a cliff with nothing left to pay for it. Under the ladder, +160 of retained rungs
+covered it comfortably. Measured over three seeds, 4,000 episodes against a static
+defence:
+
+| shaping | attacker success | mean depth |
+|---|---|---|
+| `raw_ladder` | **66.7%** | **5.00 of 6** |
+| `potential_based` | 0.0% | 0.00 of 6 |
+
+Red under potential-based shaping never breaches even Layer 1. It runs the full 250 steps
+for a return of exactly −250, and **it is right to**: that is the optimal policy for the
+reward function. The learner was never broken.
+
+So `RAW_LADDER` is the default. §5.4's ladder was never there to preserve optimality — it
+was there to make a problem Phase 1 measured as *unlearnable* (0% wins, depth 0.78 of 6)
+learnable. **Guaranteeing that shaping changes nothing guarantees it does not help.**
+
+`POTENTIAL_BASED` is kept, because the comparison above is a genuine result: a well-known
+theorem's limit demonstrated rather than cited.
+
+> **Viva question.** *When is potential-based shaping the wrong choice?*
+> When you need the shaping to change behaviour rather than just accelerate it. The
+> invariance guarantee cuts both ways — it sums to zero over any trajectory, so it can
+> reshape intermediate value estimates to guide exploration but can never add incentive.
+> If your terminal reward is discounted down to roughly the cost of the risks on the way
+> to it, you still have the sparse problem you started with. I measured it: 66.7%
+> attacker success with the plain ladder, 0.0% with the potential-based version, in the
+> same environment with the same learner.
+
+> **The transferable lesson.** "Theoretically sound" and "works here" are different
+> claims. I had the theorem right and the engineering wrong, and only a measurement
+> separated them.
 
 > **Viva question.** *You fixed your reward function and results got worse. Why?*
 > The fix was right — it made the shaping potential-based, so it can no longer change
