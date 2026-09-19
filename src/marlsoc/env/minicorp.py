@@ -42,7 +42,7 @@ from typing import Any, Final
 
 import numpy as np
 
-from marlsoc.config import ScenarioConfig
+from marlsoc.config import RewardStructure, ScenarioConfig
 from marlsoc.env import actions as act
 from marlsoc.env import detection as det
 from marlsoc.env import layers as lyr
@@ -228,8 +228,16 @@ class MiniCorp:
             "R_scout": rw.red_reward(self.state, events, self.rewards),
             "R_breach": rw.red_reward(self.state, events, self.rewards),
         }
-        blue = rw.blue_reward(self.state, events, self.rewards)
-        rewards.update({a: blue for a in topo.DEFENDER_ZONES})
+        if self.scenario.reward_structure is RewardStructure.INDIVIDUAL:
+            # Section 6's headline experiment. A different reward *structure*, so a
+            # different function rather than a parameter -- see rewards.blue_reward_individual.
+            rewards.update({
+                a: rw.blue_reward_individual(a, self.state, events, self.rewards)
+                for a in topo.DEFENDER_ZONES
+            })
+        else:
+            blue = rw.blue_reward(self.state, events, self.rewards)
+            rewards.update({a: blue for a in topo.DEFENDER_ZONES})
 
         return self.observations(), rewards, done, self._info(events)
 

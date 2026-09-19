@@ -162,3 +162,67 @@ def curriculum_curve(
     fig.savefig(path, dpi=130)
     plt.close(fig)
     return path
+
+
+def arms_race(
+    phases,
+    path: Path,
+    *,
+    title: str = "Alternating training — the arms race",
+    iql_phases=None,
+) -> Path:
+    """CLAUDE.md 3.8's cross-phase plot: both teams' scores across training phases.
+
+    Each point is a **greedy** evaluation taken after a training phase, for the reason
+    3.23 gives -- a training win rate measures the exploring policy, not the one being
+    deployed. Phases where blue trained are shaded, so the expected sawtooth is readable
+    as cause and effect: attacker success should fall while blue trains and rise while
+    red trains, with both teams improving in absolute terms round on round.
+
+    Passing ``iql_phases`` overlays the simultaneous-learning control (3.4). The claim
+    that plot is making is not "IQL is worse" but "IQL does not settle" -- so what to
+    look at is the *amplitude* of the oscillation rather than its level. The number
+    underneath it is ``alternating.instability``.
+    """
+    import numpy as np
+
+    fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
+    x = np.arange(1, len(phases) + 1)
+
+    axes[0].plot(x, [p.attacker_success for p in phases], "o-",
+                 color="#d62728", lw=1.8, label="alternating")
+    axes[0].set_ylabel("attacker success")
+    axes[0].set_ylim(-0.05, 1.05)
+    axes[0].set_title(title)
+
+    axes[1].plot(x, [p.blue_return for p in phases], "o-",
+                 color="#1f77b4", lw=1.8, label="alternating")
+    axes[1].set_ylabel("blue return")
+    axes[1].set_xlabel("training phase")
+
+    if iql_phases:
+        xi = np.linspace(1, len(phases), num=len(iql_phases))
+        axes[0].plot(xi, [p.attacker_success for p in iql_phases], "s--",
+                     color="#7f7f7f", lw=1.4, alpha=0.9, label="IQL (simultaneous)")
+        axes[1].plot(xi, [p.blue_return for p in iql_phases], "s--",
+                     color="#7f7f7f", lw=1.4, alpha=0.9, label="IQL (simultaneous)")
+
+    # Shade the phases in which blue was the learner, so the sawtooth reads as cause
+    # and effect rather than as noise.
+    for i, phase in enumerate(phases, start=1):
+        if phase.trained == "blue":
+            for ax in axes:
+                ax.axvspan(i - 0.5, i + 0.5, color="#1f77b4", alpha=0.07, lw=0)
+
+    for ax in axes:
+        ax.grid(alpha=0.25, lw=0.5)
+        ax.legend(loc="best", fontsize=8)
+
+    axes[0].text(0.01, 0.97, "shaded = blue trained this phase", transform=axes[0].transAxes,
+                 fontsize=8, va="top", color="#1f77b4")
+
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=140)
+    plt.close(fig)
+    return path

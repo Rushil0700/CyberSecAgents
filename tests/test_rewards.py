@@ -12,6 +12,7 @@ import pytest
 
 from marlsoc.config import AvailabilityCost, RewardShaping
 from marlsoc.env import layers as lyr
+from marlsoc.env import topology as topo
 from marlsoc.env import rewards as rw
 from marlsoc.env.layers import Layer, LayerStatus
 from marlsoc.env.rewards import RewardConfig, StepEvents
@@ -355,3 +356,74 @@ class TestAttackingMustBeatIdling:
 
     def test_the_default_is_the_configuration_that_attacks(self) -> None:
         assert rw.attack_margin(self.STEPS, 1, self.GAMMA) > 0.0
+
+
+class TestIndividualReward:
+    """PROJECT.md section 6's headline experiment: shared return against per-zone return.
+
+    Nobody is instructed to cooperate or to defect. Which behaviour appears is a
+    consequence of which return each defender is maximising, and these tests pin the
+    structural difference that produces it.
+    """
+
+    def test_a_defender_pays_only_for_its_own_zone(self) -> None:
+        state = fresh()
+        state.compromise("ad-controller")          # a Corp host
+        base = rw.DEFAULT.step_cost
+        assert rw.blue_reward_individual("B_corp", state, StepEvents()) == base - 10.0
+        assert rw.blue_reward_individual("B_dmz", state, StepEvents()) == base
+        assert rw.blue_reward_individual("B_secure", state, StepEvents()) == base
+
+    def test_the_shared_reward_charges_everyone_for_the_same_breach(self) -> None:
+        """The contrast that makes hand-off worth learning under shared reward."""
+        state = fresh()
+        state.compromise("ad-controller")
+        shared = rw.blue_reward(state, StepEvents())
+        assert shared == rw.DEFAULT.step_cost - 10.0
+        # Every defender receives that same number, including the two that cannot act on it.
+        assert all(rw.blue_reward(state, StepEvents()) == shared
+                   for _ in topo.DEFENDER_ZONES)
+
+    def test_losing_the_crown_jewel_is_charged_to_one_defender_only(self) -> None:
+        """Why section 6 predicts B_dmz turns trigger-happy: the downstream cost of a
+        missed intrusion is somebody else's entirely."""
+        state = fresh()
+        events = StepEvents(red_won=True)
+        charged = {a: rw.blue_reward_individual(a, state, events)
+                   for a in topo.DEFENDER_ZONES}
+        assert charged["B_secure"] == rw.DEFAULT.step_cost - 100.0
+        assert charged["B_dmz"] == rw.DEFAULT.step_cost
+        assert charged["B_corp"] == rw.DEFAULT.step_cost
+
+    def test_each_defender_is_paid_for_its_own_repair_action(self) -> None:
+        """Layer 3 has no enforcing host, but B_corp restores it with rotate_credentials.
+        Attributing repairs by LayerSpec.enforced_by paid B_corp nothing for its own
+        action; the action map is the authority."""
+        from marlsoc.env import actions as act
+        for agent, verb in act.AGENT_REINFORCE.items():
+            layer = act.REINFORCE_LAYER[verb]
+            events = StepEvents(layers_restored=[layer])
+            paid = {a: rw.blue_reward_individual(a, fresh(), events)
+                    for a in topo.DEFENDER_ZONES}
+            assert paid[agent] == rw.DEFAULT.step_cost + 25.0, (agent, layer)
+            assert all(paid[o] == rw.DEFAULT.step_cost
+                       for o in topo.DEFENDER_ZONES if o != agent)
+
+    def test_isolation_credit_and_its_cost_land_on_the_same_defender(self) -> None:
+        """Otherwise a defender could bank the +50 and externalise the availability cost,
+        which would make the individual variant incoherent rather than merely selfish."""
+        state = fresh()
+        state.compromise("web-portal")             # a DMZ host
+        state.isolate("web-portal")
+        events = StepEvents(correct_isolations=["web-portal"])
+        dmz = rw.blue_reward_individual("B_dmz", state, events)
+        corp = rw.blue_reward_individual("B_corp", state, events)
+        assert dmz == rw.DEFAULT.step_cost + 50.0 - 2.0
+        assert corp == rw.DEFAULT.step_cost
+
+    def test_every_defended_host_belongs_to_exactly_one_defender(self) -> None:
+        """The attribution argument in ``owns`` depends on it."""
+        for zone in topo.DEFENDED_ZONES:
+            for host in topo.hosts_in(zone):
+                owners = [a for a in topo.DEFENDER_ZONES if rw.owns(a, host.name)]
+                assert len(owners) == 1, (host.name, owners)

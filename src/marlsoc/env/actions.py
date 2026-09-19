@@ -176,7 +176,7 @@ REINFORCE_LAYER: Final[dict[Verb, Layer]] = {
     Verb.HARDEN_MFA: Layer.APPROVAL,
 }
 
-_AGENT_REINFORCE: Final[dict[str, Verb]] = {
+AGENT_REINFORCE: Final[dict[str, Verb]] = {
     "B_dmz": Verb.TIGHTEN_RATELIMIT,
     "B_corp": Verb.ROTATE_CREDENTIALS,
     "B_secure": Verb.HARDEN_MFA,
@@ -215,7 +215,7 @@ def blue_actions(agent: str) -> tuple[Action, ...]:
     hosts = topo.defended_hosts(agent)
     actions = [Action(Verb.BLOCK, host=h.name) for h in hosts]
     actions += [Action(Verb.ISOLATE, host=h.name) for h in hosts]
-    actions.append(Action(_AGENT_REINFORCE[agent]))
+    actions.append(Action(AGENT_REINFORCE[agent]))
     if _honeypot_slots(agent):
         actions.append(Action(Verb.DEPLOY_HONEYPOT))
     actions.append(Action(Verb.NOOP))

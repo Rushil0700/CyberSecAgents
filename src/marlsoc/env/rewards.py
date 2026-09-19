@@ -32,7 +32,9 @@ from dataclasses import dataclass, field
 from typing import Final
 
 from marlsoc.config import AvailabilityCost, RewardShaping
+from marlsoc.env import actions as act
 from marlsoc.env import layers as lyr
+from marlsoc.env import topology as topo
 from marlsoc.env.layers import Layer
 from marlsoc.env.state import EpisodeState, HostStatus
 
@@ -187,6 +189,101 @@ def blue_reward(
         reward += cfg.blocked_host_per_step * state.blocked_count
 
     return reward
+
+
+def owns(agent: str, host: str) -> bool:
+    """Whether ``host`` falls in ``agent``'s zones.
+
+    Attribution for the individual-reward variant is exact rather than heuristic: action
+    spaces are built per zone, so the only defender that *can* isolate a host in a zone is
+    the one that owns it. Reading ownership off the topology therefore recovers who acted,
+    without ``StepEvents`` having to carry an actor field it needs for nothing else.
+    """
+    return topo.BY_NAME[host].zone in topo.DEFENDER_ZONES[agent]
+
+
+def blue_reward_individual(
+    agent: str,
+    state: EpisodeState,
+    events: StepEvents,
+    cfg: RewardConfig = DEFAULT,
+) -> float:
+    """``R_blue_i`` -- each defender paid only for its own zone. PROJECT.md section 6.
+
+    The headline emergent-behaviour experiment, and deliberately a **separate function**
+    rather than a flag on ``RewardConfig``: it is a different reward *structure*, not a
+    different number, and hiding a structural change behind a boolean is how a sweep ends
+    up comparing two things nobody can name afterwards.
+
+    Every term is restricted to hosts the agent owns:
+
+    - the **bleed** counts only compromised hosts in its zones, so letting an attacker
+      through stops being its problem the moment the attacker leaves;
+    - **isolations and false positives** are its own, by the attribution argument in
+      ``owns``;
+    - the **-100 for losing the crown jewel** lands only on the defender whose zone holds
+      it, which is ``B_secure``.
+
+    That last line is what makes section 6's prediction sharp. ``B_dmz`` has **no stake at
+    all** in the crown jewel: isolating is cheap for it, and the entire downstream cost of
+    a missed intrusion is charged to somebody else. The prediction is that it becomes
+    trigger-happy -- more isolations, more false positives -- while shared reward teaches
+    restraint and hand-off. Nobody is instructed to cooperate or to defect in either case;
+    the behaviour falls out of which return each agent is maximising.
+    """
+    reward = cfg.step_cost
+
+    if events.red_won and owns(agent, topo.CROWN_JEWEL):
+        reward -= cfg.red_win
+
+    reward += cfg.compromised_host_per_step * sum(
+        1 for host, st in state.true_status.items()
+        if st is HostStatus.COMPROMISED and owns(agent, host)
+    )
+    reward += cfg.correct_isolation * sum(
+        1 for h in events.correct_isolations if owns(agent, h)
+    )
+    reward += cfg.false_positive * sum(
+        1 for h in events.false_positives if owns(agent, h)
+    )
+    reward += cfg.layer_restored * sum(
+        1 for layer in events.layers_restored
+        if _restorer(layer) == agent
+    )
+
+    # The honeypot payoff belongs to whoever runs the decoy that was touched. Events carry
+    # only a count, so it is split evenly rather than misattributed -- honeypots are rare
+    # enough that the approximation changes no conclusion, and guessing an owner would.
+    if events.honeypot_hits:
+        reward += (cfg.honeypot_engagement * events.honeypot_hits
+                   / len(topo.DEFENDER_ZONES))
+
+    if cfg.availability_cost is AvailabilityCost.PER_STEP:
+        reward += cfg.isolated_host_per_step * sum(
+            1 for host, st in state.true_status.items()
+            if st is HostStatus.ISOLATED and owns(agent, host)
+        )
+        reward += cfg.blocked_host_per_step * sum(
+            1 for host in state.blocked_hosts() if owns(agent, host)
+        )
+
+    return reward
+
+
+def _restorer(layer: Layer) -> str | None:
+    """Which defender repairs ``layer``, or None if no action restores it.
+
+    Read from ``actions.AGENT_REINFORCE``, which is the authority: section 4.2 gives each
+    defender exactly one reinforcement action, and that mapping is what the environment
+    actually executes. Deriving it from ``LayerSpec.enforced_by`` instead looks equivalent
+    and is not -- Layer 3 (AUTH) has ``enforced_by = None`` because no single host
+    implements it, yet ``B_corp`` restores it with ``rotate_credentials``. That version
+    paid ``B_corp`` nothing for its own repair action.
+    """
+    for agent, verb in act.AGENT_REINFORCE.items():
+        if act.REINFORCE_LAYER[verb] is layer:
+            return agent
+    return None
 
 
 def red_reward(

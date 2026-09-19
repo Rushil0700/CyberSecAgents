@@ -86,6 +86,24 @@ class RewardShaping(str, Enum):
     POTENTIAL_BASED = "potential_based"
 
 
+class RewardStructure(str, Enum):
+    """Whether the defenders share one return or each receive their own. Section 6.
+
+    SHARED gives all three defenders the same number, so cooperation is a *consequence* of
+    the return rather than an instruction -- the DMZ defender pays for a corporate breach,
+    which is what makes hand-off worth learning.
+
+    INDIVIDUAL charges each defender only for its own zone, including the -100 for losing
+    the crown jewel, which lands on ``B_secure`` alone. Section 6 predicts this makes
+    ``B_dmz`` selfishly trigger-happy: isolating is cheap for it and the downstream cost of
+    a missed intrusion is charged to somebody else. The behavioural difference between the
+    two is the project's emergent-behaviour finding, so both are first-class.
+    """
+
+    SHARED = "shared"
+    INDIVIDUAL = "individual"
+
+
 class Policy(str, Enum):
     """How an agent chooses actions.
 
@@ -139,6 +157,7 @@ class ScenarioConfig:
     agents: dict[str, AgentConfig] = field(default_factory=dict)
     availability_cost: AvailabilityCost = AvailabilityCost.PER_STEP
     shaping: RewardShaping = RewardShaping.RAW_LADDER
+    reward_structure: RewardStructure = RewardStructure.SHARED
     max_layer: int = 6
     step_limit: int = 250
 

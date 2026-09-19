@@ -271,10 +271,19 @@ class EpisodeState:
     def is_blocked(self, host: str) -> bool:
         return self.blocked_until.get(host, -1) > self.step
 
+    def blocked_hosts(self) -> tuple[str, ...]:
+        """Hosts currently under an active block.
+
+        The names rather than the count, because the individual-reward variant
+        (PROJECT.md section 6) charges each defender only for blocks in its own zone and
+        cannot do that from a total.
+        """
+        return tuple(host for host in self.blocked_until if self.is_blocked(host))
+
     @property
     def blocked_count(self) -> int:
         """Hosts currently under an active block -- the availability cost of prevention."""
-        return sum(1 for host in self.blocked_until if self.is_blocked(host))
+        return len(self.blocked_hosts())
 
     def mark_detected(self) -> None:
         """A truly compromised host has been flagged. Stamps MTTD once."""
