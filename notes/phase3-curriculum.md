@@ -248,6 +248,73 @@ theorem's limit demonstrated rather than cited.
 > preferred things it had never tried. `q_init` isn't a free hyperparameter; it's a claim
 > about the scale of your returns, and any change that moves that scale invalidates it.
 
+## Result 6 — the headline, and why the mean is the wrong way to report it
+
+Four arms, 9,000 episodes each, three seeds, all against the frozen Phase 2 defender:
+
+| arm | attacker success | depth | steps |
+|---|---|---|---|
+| scripted red (oracle reference) | 11.3% | 2.95 | 25.5 |
+| learned red, no curriculum | 0.0% (sd 0.0) | 2.62 | 19.6 |
+| learned red, curriculum | 1.7% (sd 2.1) | 2.63 | 27.2 |
+| learned red, static warm-up then fine-tune | 3.3% (sd 4.7) | 2.79 | 25.2 |
+
+The ordering is exactly what §7.4 predicts — more curriculum, better attacker — but **the
+means are misleading and should not be quoted alone.** Per seed:
+
+```
+    direct:  0.0%   0.0%   0.0%
+curriculum:  4.7%   0.0%   0.3%
+    warmup:  0.0%  10.0%   0.0%
+```
+
+"3.3%" is really *one seed reaching 10.0% and two producing nothing*. The outcome is
+bimodal, and a mean over a bimodal distribution describes none of the runs in it. Stated
+honestly:
+
+- **The curriculum is necessary.** Direct training against the trained defender produces
+  nothing at all, in every seed.
+- **The curriculum is not sufficient.** It produces a working attacker in roughly one seed
+  in three.
+- **When it works it nearly matches the oracle** — 10.0% against 11.3%, and the oracle
+  reads true state the learner cannot see. So the ceiling is reachable, and what is
+  missing is *reliability*, not incentive.
+
+That diagnosis points at variance reduction — exploration scheduling, seed count, maybe
+Expected SARSA's lower-variance target — rather than at more reward engineering. Reward
+engineering is what Results 1–5 were, and they are done.
+
+> **Viva question.** *Your attacker scores 3.3%. Is that a result?*
+> Not as a mean, no. Three seeds gave 0%, 10% and 0%, so the mean describes none of them —
+> the outcome is bimodal and the honest claim is that the curriculum produces a working
+> attacker about one run in three, and that when it works it nearly matches a
+> full-observability scripted expert. Reporting 3.3% would imply a consistently weak
+> attacker, which is a different and wrong claim.
+
+### The stage transitions say the same thing twice
+
+Against the **trained** defender, promotion collapses to forced (§3.21):
+
+```
+ep  599: stage 1 -> 2  success 96.7%
+ep 2280: stage 2 -> 3  success 65.0%  (FORCED)
+ep 3960: stage 3 -> 4  success  8.3%  (FORCED)
+ep 5640: stage 4 -> 5  success  0.0%  (FORCED)
+```
+
+Against a **static** defence, every stage is cleared on merit — and because promotion is
+now judged greedily (§3.23), these are claims about the deployable policy:
+
+```
+ep  599: stage 1 -> 2  success 100.0%
+ep 1199: stage 2 -> 3  success 100.0%
+ep 1799: stage 3 -> 4  success 100.0%
+ep 2399: stage 4 -> 5  success 100.0%
+```
+
+Red can learn the whole six-layer chain. What it cannot yet do *reliably* is carry that
+policy across to an opponent that fights back.
+
 ## What to be able to explain from this phase
 
 1. Why a curriculum is necessary here, in terms of sparse reward and horizon — with the

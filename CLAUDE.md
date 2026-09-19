@@ -443,8 +443,23 @@ property of the reward function, so **any reward change re-opens the question** 
 potential-based shaping moved red's returns from ≈ +15 to ≈ −100 and silently re-armed
 this trap on an agent that had previously been fine.
 
-**Phase 3 — in progress.** Red learns with the curriculum (`PROJECT.md` §7.4). Two things
-found immediately:
+**Phase 3 — measured, with an honest caveat.** Red learns with the curriculum
+(`PROJECT.md` §7.4). Write-up: `notes/phase3-curriculum.md`. 300 tests.
+
+Headline, four arms at 9,000 episodes against the frozen Phase 2 defender, three seeds:
+scripted oracle 11.3%, no curriculum **0.0%**, curriculum **1.7%**, static warm-up then
+fine-tune **3.3%**. The ordering is what §7.4 predicts, but **do not quote those means**:
+per seed the warm-up arm is 0.0 / 10.0 / 0.0 and the curriculum arm 4.7 / 0.0 / 0.3. The
+outcome is **bimodal** — the curriculum produces a working attacker about one run in three,
+and when it works it nearly matches an oracle that reads true state the learner cannot see.
+A mean over a bimodal distribution describes none of the runs in it.
+
+Against a *static* defence red clears every stage at 100% on a **greedy** evaluation, so it
+can learn the whole six-layer chain; what it cannot yet do reliably is carry that policy to
+an opponent that fights back. The gap is **variance, not incentive** — which points at
+exploration scheduling and seed count, not more reward engineering.
+
+Two things found early and still true:
 
 - **Against a static defence the curriculum is unnecessary** — red already wins ~100% at
   every stage unopposed (measured in Phase 1). §12's "red vs static defence" is a warm-up,
