@@ -36,6 +36,22 @@ expert manages 11%, so the threshold is unreachable by construction: red reached
 spent 4,885 of its 9,000 episodes there winning 2.3%, and was then evaluated at stage 5 --
 a depth it had never once trained at. The stage cap is now a share of the remaining budget.
 
+**Correct shaping is not the same as useful shaping** (CLAUDE.md 3.18). Making §5.4's
+ladder potential-based -- `γΦ(s') − Φ(s)` with `Φ(terminal) = 0`, per Ng, Harada & Russell
+(1999) -- is right in the sense the theorem means: it cannot change the optimal policy.
+Here that is exactly the problem. The shaping then sums to zero over any trajectory, so
+red's whole incentive is the terminal +100, and discounted over the ~29 steps to the crown
+jewel that is +22.6 against -15.5 of step costs; one -50 detection, which the alert process
+charges *even against a static defence*, makes winning about -23 against about -20 for
+idling. Red learned to idle -- 250 steps, return exactly -250, never breaching Layer 1 --
+and was right to. Three seeds, 4,000 episodes, against a static defence:
+
+    raw_ladder        attacker 66.7%   mean depth 5.00 of 6
+    potential_based   attacker  0.0%   mean depth 0.00 of 6
+
+The ladder is the default. `RewardShaping.POTENTIAL_BASED` is kept because that comparison
+is a result worth showing.
+
 The four arms
 -------------
 ``scripted``    The fixed reference. A hand-written priority list, not a learner, so it
