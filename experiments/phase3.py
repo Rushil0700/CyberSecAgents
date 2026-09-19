@@ -179,11 +179,18 @@ def arm_direct(seed: int, episodes: int) -> tuple[dict, None]:
     return score(run.controllers, sc), run.log
 
 
+# Promotion is judged on a greedy probe (CLAUDE.md 3.23), which costs real episodes:
+# at the defaults that is 100 evaluation episodes every 200 training ones, or 50%
+# overhead on every curriculum arm. 60 every 250 holds the same signal at 24%. It is
+# named here rather than inherited so the run's cost is part of the experiment's record.
+CURRICULUM = CurriculumConfig(greedy_eval_episodes=60, greedy_eval_every=250)
+
+
 def arm_curriculum(seed: int, episodes: int) -> tuple[dict, object]:
     sc = scenario(seed, blue=FROZEN_BLUE)
     lcfg = red_config(episodes)
     ctrl = controllers_with_trained_blue(sc, seed, lcfg)
-    run = train_curriculum(sc, episodes, lcfg, CurriculumConfig(),
+    run = train_curriculum(sc, episodes, lcfg, CURRICULUM,
                            controllers=ctrl, verbose=False)
     return score(run.controllers, sc), run
 
@@ -201,7 +208,7 @@ def arm_warmup(seed: int, episodes: int) -> tuple[dict, object]:
 
     static_sc = scenario(seed, blue=STATIC_BLUE)
     lcfg = red_config(warm)
-    warm_run = train_curriculum(static_sc, warm, lcfg, CurriculumConfig(), verbose=False)
+    warm_run = train_curriculum(static_sc, warm, lcfg, CURRICULUM, verbose=False)
 
     live_sc = scenario(seed, blue=FROZEN_BLUE)
     ctrl = controllers_with_trained_blue(live_sc, seed, red_config(tune))
