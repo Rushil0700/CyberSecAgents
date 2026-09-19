@@ -379,6 +379,42 @@ the first thing checked. **When an agent underperforms, instrument what it did b
 theorising about why.** Every one of the three hypotheses was coherent, had a mechanism,
 and was wrong.
 
+### 3.23 Promote on the policy you intend to keep (Phase 3)
+
+The curriculum promoted on the win rate over recent **training** episodes. Training is
+ε-greedy, so that is the *exploring* policy's rate. Measured: every stage transition
+reported **100% success** while a greedy evaluation of the same agent against the same
+static defence scored **0.0%**. ε-greedy explores past its own bad estimates and finishes
+the chain; the policy you would deploy cannot. The curriculum was certifying stages the
+agent could not perform.
+
+`CurriculumConfig.promote_on_greedy` (default on) runs a short greedy evaluation at the
+current stage every `greedy_eval_every` episodes and judges promotion on that. The rate
+stored on the transition is the one promotion was actually judged on, so the sawtooth is
+not annotated with a number that decided nothing.
+
+**When a training curve and an evaluation score disagree, they are measuring two different
+policies.** Check `untried_greedy_fraction` first.
+
+### 3.24 With all-negative returns, `q_init = 0` means "only do what you have never done"
+
+The sharper form of 3.14, found on red. Every return here is negative, so an action's value
+can only *fall* once it is tried. Initialised at 0.0, an action that has been tried is
+therefore permanently ranked **below every action that has not** — and the greedy policy
+becomes "prefer the unexplored", which at evaluation is a lottery over useless actions.
+
+Measured on red after a curriculum warm-up: `untried_greedy_fraction` 100%, mean depth
+**0.00 layers**, 250 steps, return exactly −250 — red never breached even Layer 1 and ran
+out the clock. The scout's `slow_scan`, the one action that opens the episode, had been
+tried, so it sat below every untried action and was never selected again. Annealing ε to
+0.02 did not recover it, because this is not an exploration failure: it is the greedy
+argmax itself.
+
+`q_init` must be set near the scale of the returns actually observed. That scale is a
+property of the reward function, so **any reward change re-opens the question** — 3.18's
+potential-based shaping moved red's returns from ≈ +15 to ≈ −100 and silently re-armed
+this trap on an agent that had previously been fine.
+
 **Phase 3 — in progress.** Red learns with the curriculum (`PROJECT.md` §7.4). Two things
 found immediately:
 

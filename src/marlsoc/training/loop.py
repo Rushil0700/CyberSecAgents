@@ -44,6 +44,8 @@ different lengths, and every curve in section 9 compares across exactly that.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from dataclasses import dataclass
 from typing import NamedTuple, Protocol
 
@@ -486,6 +488,18 @@ def train_curriculum(
             "phase": f"stage{curriculum.stage_number}",
             "learner": "red",
         }))
+
+        # Promotion is judged on the *greedy* policy, not on the exploring one that
+        # generated the episode above. See CurriculumConfig.promote_on_greedy: every
+        # transition once reported 100% success while a greedy evaluation of the same
+        # agent scored 0.0%, because epsilon-greedy explores past its own bad estimates
+        # and the deployable policy cannot.
+        if curriculum.due_for_evaluation():
+            probe = replace(scenario, max_layer=curriculum.max_layer)
+            snapshot = evaluate(probe, controllers,
+                                curriculum.config.greedy_eval_episodes,
+                                phase=f"probe{curriculum.stage_number}")
+            curriculum.record_evaluation(snapshot.rate("red_win"))
 
         transition = curriculum.record(
             won=record.outcome == "red_win", episode=episode

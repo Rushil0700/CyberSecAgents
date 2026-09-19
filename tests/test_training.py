@@ -324,7 +324,11 @@ class TestCurriculum:
 
     def _config(self, **kw):
         from marlsoc.training.curriculum import CurriculumConfig
-        base = dict(promote_window=10, min_episodes_per_stage=10,
+        # promote_on_greedy is off by default here: these tests drive Curriculum.record
+        # directly and are about the promotion *mechanics* -- the dwell time, the window
+        # reset, the forced promotion. Which policy supplies the rate is a separate
+        # concern, tested in TestPromotionJudgesTheGreedyPolicy.
+        base = dict(promote_window=10, min_episodes_per_stage=10, promote_on_greedy=False,
                     promote_threshold=0.7, max_episodes_per_stage=1000)
         base.update(kw)
         return CurriculumConfig(**base)
@@ -558,3 +562,58 @@ class TestEvaluationRestoresWhatItFound:
         assert not ctrl["B_dmz"].greedy
         evaluate(sc, ctrl, 3)
         assert not ctrl["B_dmz"].greedy
+
+
+class TestPromotionJudgesTheGreedyPolicy:
+    """A curriculum must promote on the policy you intend to keep (CLAUDE.md 3.23).
+
+    Training episodes are epsilon-greedy, so their win rate is the *exploring* policy's.
+    When most greedy actions have never been updated, the exploring policy finishes the
+    chain while the deployable one cannot -- measured, every stage transition reported
+    100% success while a greedy evaluation of the same agent against the same static
+    defence scored 0.0%.
+    """
+
+    def _curriculum(self, **kw):
+        from marlsoc.training.curriculum import Curriculum, CurriculumConfig
+        base = dict(promote_window=10, min_episodes_per_stage=10,
+                    promote_threshold=0.7, max_episodes_per_stage=10_000)
+        base.update(kw)
+        return Curriculum(CurriculumConfig(**base))
+
+    def test_winning_while_exploring_is_not_enough_to_promote(self) -> None:
+        c = self._curriculum()
+        for i in range(200):
+            assert c.record(won=True, episode=i) is None, "promoted on the training rate"
+        assert c.stage_number == 1
+
+    def test_a_good_greedy_evaluation_promotes(self) -> None:
+        c = self._curriculum()
+        for i in range(20):
+            c.record(won=True, episode=i)
+        c.record_evaluation(0.9)
+        assert c.record(won=True, episode=20) is not None
+
+    def test_a_poor_greedy_evaluation_does_not(self) -> None:
+        c = self._curriculum()
+        for i in range(20):
+            c.record(won=True, episode=i)
+        c.record_evaluation(0.1)          # exploring wins every episode, greedy does not
+        assert c.record(won=True, episode=20) is None
+
+    def test_the_recorded_rate_is_the_one_promotion_was_judged_on(self) -> None:
+        """Otherwise the sawtooth plot is annotated with a number that decided nothing."""
+        c = self._curriculum()
+        for i in range(20):
+            c.record(won=True, episode=i)
+        c.record_evaluation(0.85)
+        transition = c.record(won=True, episode=20)
+        assert transition is not None and transition.success_rate == 0.85
+
+    def test_a_stale_evaluation_does_not_carry_into_the_next_stage(self) -> None:
+        c = self._curriculum()
+        for i in range(20):
+            c.record(won=True, episode=i)
+        c.record_evaluation(0.9)
+        assert c.record(won=True, episode=20) is not None
+        assert c.greedy_rate is None, "the new stage inherited the old stage's evidence"

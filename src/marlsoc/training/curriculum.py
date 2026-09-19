@@ -58,6 +58,17 @@ class CurriculumConfig:
 
     Attributes:
         stages: Deepest active layer at each stage.
+        promote_on_greedy: Promote on a **greedy evaluation** rather than on the win rate
+            over recent training episodes. Training episodes are epsilon-greedy, so the
+            training rate is the *exploring* policy's -- and when most greedy actions have
+            never been updated, the exploring policy finishes the chain while the policy
+            you would actually deploy cannot. Measured: every stage transition reported
+            100% success while a greedy evaluation of the same agent against the same
+            static defence scored 0.0%, with 85% of visited states having a never-updated
+            greedy action. A curriculum must promote on the performance of the policy you
+            intend to keep, or it certifies stages the agent cannot perform.
+        greedy_eval_episodes: Episodes per greedy evaluation. Small -- it runs often.
+        greedy_eval_every: How often to run one, in training episodes.
         promote_threshold: Success rate over the recent window required to promote.
             Section 7.4 suggests 0.70.
         promote_window: Episodes the success rate is measured over.
@@ -87,6 +98,9 @@ class CurriculumConfig:
     """
 
     stages: tuple[int, ...] = STAGES
+    promote_on_greedy: bool = True
+    greedy_eval_episodes: int = 100
+    greedy_eval_every: int = 200
     promote_threshold: float = 0.70
     promote_window: int = 200
     min_episodes_per_stage: int = 600
@@ -121,6 +135,7 @@ class Curriculum:
     index: int = 0
     episodes_at_stage: int = 0
     transitions: list[StageTransition] = field(default_factory=list)
+    greedy_rate: float | None = None
     _recent: deque[bool] = field(default_factory=deque, repr=False)
 
     def __post_init__(self) -> None:
@@ -144,8 +159,32 @@ class Curriculum:
 
     @property
     def success_rate(self) -> float:
-        """Red's win rate over the recent window."""
+        """Red's win rate over the recent *training* window -- the exploring policy."""
         return sum(self._recent) / len(self._recent) if self._recent else 0.0
+
+    @property
+    def promotion_rate(self) -> float | None:
+        """The rate promotion is actually judged on.
+
+        ``None`` under ``promote_on_greedy`` until the first greedy evaluation has been
+        reported, which is what stops a stage promoting on no evidence at all.
+        """
+        if not self.config.promote_on_greedy:
+            return self.success_rate
+        return self.greedy_rate
+
+    def record_evaluation(self, rate: float) -> None:
+        """Report a greedy evaluation of the current stage. See ``promote_on_greedy``."""
+        self.greedy_rate = rate
+
+    def due_for_evaluation(self) -> bool:
+        """Whether the caller should run a greedy evaluation now."""
+        return (
+            self.config.promote_on_greedy
+            and not self.finished
+            and self.episodes_at_stage > 0
+            and self.episodes_at_stage % self.config.greedy_eval_every == 0
+        )
 
     # ----------------------------------------------------------------------------------
     def record(self, *, won: bool, episode: int) -> StageTransition | None:
@@ -166,10 +205,12 @@ class Curriculum:
             return None
 
         forced = self.episodes_at_stage >= self._stage_cap(episode)
+        judged = self.promotion_rate
         ready = (
-            self.episodes_at_stage >= self.config.min_episodes_per_stage
+            judged is not None
+            and self.episodes_at_stage >= self.config.min_episodes_per_stage
             and len(self._recent) >= self.config.promote_window
-            and self.success_rate >= self.config.promote_threshold
+            and judged >= self.config.promote_threshold
         )
         if not (ready or forced):
             return None
@@ -178,11 +219,12 @@ class Curriculum:
             episode=episode,
             from_stage=self.stage_number,
             to_stage=self.stage_number + 1,
-            success_rate=self.success_rate,
+            success_rate=judged if judged is not None else self.success_rate,
             forced=forced and not ready,
         )
         self.index += 1
         self.episodes_at_stage = 0
+        self.greedy_rate = None
         self._recent.clear()
         self.transitions.append(transition)
         return transition

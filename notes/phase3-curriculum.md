@@ -25,9 +25,9 @@ forward as the stack deepens:
 The carry-forward *is* the transfer. A table that already knows "get a DMZ foothold" does
 not relearn it when Layer 3 switches on — stage 2 only has to learn the new layer.
 
-## Result 1 — the curriculum works, and the sawtooth is real
+## Result 1 — the sawtooth is real, but read the axis carefully
 
-Against a static defence, red clears **every stage at 100%**, and all four promotions are
+Against a static defence, red clears every stage at 100% and all four promotions are
 earned rather than forced:
 
 ```
@@ -41,6 +41,35 @@ ep 2399: stage 4 -> 5  success 100.0%
 it drops, it climbs again. **Part of each drop is not red getting worse** — it is the
 exploration rewind that accompanies promotion, and the plot marks both so the two are not
 confused.
+
+### The caveat that nearly became a false claim
+
+Those 100% figures are `curriculum.success_rate`: the win rate over recent **training**
+episodes. Training episodes are ε-greedy, so **that is the exploring policy's success
+rate, not the deployable policy's.** Evaluated greedily, the same agent scores:
+
+```
+warm-up episodes   greedy success vs static   untried_greedy_fraction
+       600                    100.0%                    78%
+     2,000                      0.0%                    85%
+```
+
+More training against a *stationary* opponent made the greedy policy strictly worse. The
+mechanism is Phase 2's `q_init` trap (§3.14) on the other team: while exploring, ε-greedy
+stumbles past never-updated actions often enough to finish the chain; evaluated greedily,
+red picks an untried action in 85% of visited states and the policy collapses.
+
+**The promotion criterion is therefore measuring the wrong policy.** It certifies stages
+that the deployable agent cannot perform at all, which is why every transition above reads
+100% while the shipped policy scores zero. A curriculum must promote on the performance of
+the policy you intend to keep.
+
+> **Viva question.** *Your curve shows 100% success but your agent scores 0%. Which is
+> lying?* Neither — they measure different policies. The curve is the ε-greedy policy used
+> during training, which explores past its own bad estimates; the score is the greedy
+> policy you would deploy. When those two diverge it usually means most greedy actions
+> were never actually updated, which you can check directly with
+> `untried_greedy_fraction`. Here it was 85%.
 
 ### Why exploration has to be rewound on promotion
 
