@@ -385,6 +385,15 @@ def evaluate(
     makes a reported number better than the policy actually is.
     """
     env = MiniCorp(scenario)
+    # Remember what each controller *was*, rather than assuming it was exploring. A
+    # controller configured as Policy.GREEDY -- a frozen, deployed defender -- is greedy
+    # by design, and restoring it to False would quietly turn it into an epsilon-greedy
+    # agent for every run after its first evaluation.
+    was_greedy = {
+        name: controller.greedy
+        for name, controller in controllers.items()
+        if isinstance(controller, LearnedController)
+    }
     for controller in controllers.values():
         if isinstance(controller, LearnedController):
             controller.greedy = True
@@ -398,9 +407,8 @@ def evaluate(
         log.append(EpisodeRecord(**{**record.__dict__, "episode": episode,
                                     "phase": phase, "learner": "frozen"}))
 
-    for controller in controllers.values():
-        if isinstance(controller, LearnedController):
-            controller.greedy = False
+    for name, previous in was_greedy.items():
+        controllers[name].greedy = previous
     return log
 
 

@@ -525,3 +525,36 @@ class TestTheCurriculumAlwaysTraverses:
         for episode in range(100):
             if c.record(won=False, episode=episode) is not None:
                 raise AssertionError(f"promoted at episode {episode}, before the dwell")
+
+
+class TestEvaluationRestoresWhatItFound:
+    """An evaluation must not change the agents it measured.
+
+    ``evaluate`` forces every learned controller greedy and used to reset them all to
+    *not* greedy afterwards. A defender configured as ``Policy.GREEDY`` -- frozen and
+    deployed, per CLAUDE.md 3.7 -- is greedy by design, so its first evaluation silently
+    converted it into an epsilon-greedy agent for every run that followed.
+    """
+
+    def test_a_frozen_greedy_defender_is_still_greedy_afterwards(self) -> None:
+        from marlsoc.config import ALL_AGENTS
+        from marlsoc.training.loop import build_controller, evaluate
+
+        sc = ScenarioConfig(seed=1, agents={
+            "B_dmz": AgentConfig(learning=False, policy=Policy.GREEDY)})
+        rng = np.random.default_rng(1)
+        ctrl = {a: build_controller(a, sc.for_agent(a), rng) for a in ALL_AGENTS}
+        assert ctrl["B_dmz"].greedy, "a GREEDY-policy controller should start greedy"
+        evaluate(sc, ctrl, 3)
+        assert ctrl["B_dmz"].greedy, "evaluation turned the frozen defender loose"
+
+    def test_a_training_agent_is_still_exploring_afterwards(self) -> None:
+        from marlsoc.config import ALL_AGENTS
+        from marlsoc.training.loop import build_controller, evaluate
+
+        sc = ScenarioConfig(seed=1)
+        rng = np.random.default_rng(1)
+        ctrl = {a: build_controller(a, sc.for_agent(a), rng) for a in ALL_AGENTS}
+        assert not ctrl["B_dmz"].greedy
+        evaluate(sc, ctrl, 3)
+        assert not ctrl["B_dmz"].greedy
