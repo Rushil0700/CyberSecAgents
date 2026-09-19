@@ -306,11 +306,23 @@ telescopes to `γ^T Φ(s_T) − Φ(s_0)` — zero at both ends.
 
 **And that is why `RAW_LADDER` remains the default.** Zero at both ends means the shaping
 contributes *exactly nothing* to the discounted return, so red's only incentive is the
-terminal +100. At γ = 0.95 over ~29 steps that is +22.6 against −15.5 of step costs, and a
-single −50 detection — charged by the alert process **even against a static defence**,
-because detection is environmental rather than defender-driven — makes winning ≈ −23
-against ≈ −20 for idling. **Idling wins, and red correctly learns to do nothing.** Measured
-over three seeds, 4,000 episodes against a static defence:
+terminal +100. At γ = 0.95 over ~29 steps that is +22.6 against −15.5 of step costs and
+−24.4 per detection — and detection is charged by the alert process **even against a static
+defence**, because it is environmental rather than defender-driven. The margin of winning
+over idling for 250 steps (`rewards.attack_margin`, so the arithmetic is rerunnable):
+
+| detections | `potential_based` | `raw_ladder` |
+|---|---|---|
+| 0 | +27.1 | +237.1 |
+| 1 | **+2.7** | +212.7 |
+| 2 | **−21.7** | +188.3 |
+| 3 | −46.0 | +164.0 |
+
+**Two detections invert it, and a deep run reliably takes more than one** — `escalate_
+privilege` accumulates alerts to 4.20 against a confirmation threshold of 2.5. The ladder's
+margin is ~8× larger and survives detections; the potential-based margin does not. So red
+learns to do nothing, correctly. Measured over three seeds, 4,000 episodes against a static
+defence:
 
     raw_ladder        attacker 66.7%   mean depth 5.00 of 6
     potential_based   attacker  0.0%   mean depth 0.00 of 6   (literally never breaches L1)

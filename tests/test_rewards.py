@@ -302,3 +302,56 @@ class TestTheTwoDefaultsAgree:
         the ladder, against 0.0% at depth 0.00 under potential-based shaping."""
         from marlsoc.config import RewardShaping
         assert rw.DEFAULT.shaping is RewardShaping.RAW_LADDER
+
+
+class TestAttackingMustBeatIdling:
+    """CLAUDE.md 3.18's argument, executable.
+
+    Red is only pulled towards the crown jewel if winning is worth more than sitting
+    still. Potential-based shaping telescopes to zero over a trajectory, so it leaves
+    red with the terminal +100 against the time and detections spent earning it -- and
+    discounted over ~29 steps that does not cover a single -50 detection. Red then
+    learns to do nothing, correctly. Measured against a static defence, three seeds:
+    66.7% attacker success at depth 5.00 under the ladder, 0.0% at depth 0.00 under
+    potential-based shaping.
+    """
+
+    GAMMA = 0.95
+    STEPS = 29          # measured: ~29 steps to the pivot and on to the crown jewel
+
+    def test_the_ladder_makes_attacking_clearly_worth_it(self) -> None:
+        margin = rw.attack_margin(self.STEPS, detections=1, gamma=self.GAMMA, cfg=RAW)
+        assert margin > 200.0, margin
+
+    def test_two_detections_make_idling_optimal_under_potential_shaping(self) -> None:
+        """The failure, pinned. The margin collapses and then inverts:
+
+            detections      potential_based      raw_ladder
+                     0                +27.1          +237.1
+                     1                 +2.7          +212.7
+                     2                -21.7          +188.3
+
+        A deep run reliably takes more than one: escalate_privilege accumulates alerts
+        to 4.20 against a confirmation threshold of 2.5.
+        """
+        assert rw.attack_margin(self.STEPS, 1, self.GAMMA, POTENTIAL) < 10.0
+        assert rw.attack_margin(self.STEPS, 2, self.GAMMA, POTENTIAL) < 0.0
+        assert rw.attack_margin(self.STEPS, 3, self.GAMMA, RAW) > 100.0
+
+    def test_even_undetected_the_potential_margin_is_thin(self) -> None:
+        """Without the ladder the whole incentive is a terminal reward discounted to
+        about +22.6, against roughly -15.5 of step costs. It survives a clean run and
+        nothing else, which is not a gradient a tabular learner can follow."""
+        clean = rw.attack_margin(self.STEPS, detections=0, gamma=self.GAMMA,
+                                 cfg=POTENTIAL)
+        ladder = rw.attack_margin(self.STEPS, detections=0, gamma=self.GAMMA, cfg=RAW)
+        assert 0.0 < clean < 30.0, clean
+        assert ladder > clean * 5, (ladder, clean)
+
+    def test_the_ladder_survives_detections_the_other_does_not(self) -> None:
+        """The property that actually matters: robustness, not just a bigger number."""
+        for d in (0, 1, 2, 3):
+            assert rw.attack_margin(self.STEPS, d, self.GAMMA, RAW) > 100.0
+
+    def test_the_default_is_the_configuration_that_attacks(self) -> None:
+        assert rw.attack_margin(self.STEPS, 1, self.GAMMA) > 0.0

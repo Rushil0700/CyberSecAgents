@@ -186,20 +186,30 @@ return. So red's whole incentive is the terminal +100. Work it out at γ = 0.95 
 ~29 steps to the crown jewel:
 
 ```
-terminal reward     0.95^29 × 100          = +22.6
-step costs          −(1 − 0.95^29)/0.05    = −15.5
-                                             ------
-                                             + 7.1
-one detection       −50 × 0.95^k  (k ≈ 14) ≈ −30.0
-                                             ------
-                                             −22.9     vs  −20.0 for idling 250 steps
+terminal reward     0.95^29 × 100          = +22.59
+step costs          −(1 − 0.95^29)/0.05    = −15.48
+one detection       −50 × 0.95^14          = −24.38
+idling 250 steps    −(1 − 0.95^250)/0.05   = −20.00
 ```
 
-**Idling wins.** And detection is *environmental* — the alert process charges −50 even
-against a static defence with every defender disabled — so there is no opponent to avoid,
-just a cliff with nothing left to pay for it. Under the ladder, +160 of retained rungs
-covered it comfortably. Measured over three seeds, 4,000 episodes against a static
-defence:
+So the *margin* of winning over idling — `rewards.attack_margin`, so you can rerun it:
+
+| detections | `potential_based` | `raw_ladder` |
+|---|---|---|
+| 0 | +27.1 | +237.1 |
+| 1 | **+2.7** | +212.7 |
+| 2 | **−21.7** | +188.3 |
+| 3 | −46.0 | +164.0 |
+
+**Two detections invert it.** And a deep run reliably takes more than one, because
+`escalate_privilege` accumulates alerts to 4.20 against a confirmation threshold of 2.5 —
+going deep is exactly what gets you caught. Detection is also *environmental*: the alert
+process charges −50 even against a static defence with every defender disabled, so there
+is no opponent to outplay, just a cliff with nothing left to pay for it.
+
+The ladder's margin is about 8× larger and, more importantly, **survives detections**.
+That robustness is the real difference, not the headline size. Measured over three seeds,
+4,000 episodes against a static defence:
 
 | shaping | attacker success | mean depth |
 |---|---|---|

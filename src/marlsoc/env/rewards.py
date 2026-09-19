@@ -238,6 +238,49 @@ def red_reward(
     return reward
 
 
+def attack_margin(
+    steps_to_win: int,
+    detections: int,
+    gamma: float,
+    cfg: RewardConfig = DEFAULT,
+) -> float:
+    """How much red prefers winning to idling, in *discounted* return.
+
+    Exists for the same reason ``degenerate_policy_cost`` does: CLAUDE.md 3.18's argument
+    for keeping the raw ladder is arithmetic, and arithmetic nobody can rerun is a weaker
+    argument. Positive means attacking is worth it; negative means red's optimal policy is
+    to sit still, and a learner that sits still is correct rather than broken.
+
+    Under ``RewardShaping.POTENTIAL_BASED`` the shaping telescopes to zero over any
+    trajectory, so it contributes nothing here and red is left with the terminal reward
+    against the time and the detections spent reaching it. Under ``RAW_LADDER`` the rungs
+    red keeps are added, which is the entire difference between a red that attacks and a
+    red that does not.
+
+    Args:
+        steps_to_win: Length of a winning episode.
+        detections: Detections suffered on the way, each charged ``cfg.detected``.
+        gamma: The learner's discount factor.
+        cfg: Reward parameters.
+
+    Returns:
+        Discounted value of winning minus the discounted value of idling to the horizon.
+    """
+    discount = gamma ** steps_to_win
+    win = lyr.ALTER_CREDENTIALS_REWARD * discount
+    # Detections land somewhere in the middle of the run; the midpoint is the fair
+    # summary and the conclusion does not turn on the choice.
+    win += cfg.detected * detections * (gamma ** (steps_to_win // 2))
+    if cfg.shaping is RewardShaping.RAW_LADDER:
+        win += lyr.total_ladder() - lyr.ALTER_CREDENTIALS_REWARD
+
+    def time_cost(n: int) -> float:
+        return cfg.step_cost * (1.0 - gamma ** n) / (1.0 - gamma)
+
+    idle = time_cost(250)
+    return (win + time_cost(steps_to_win)) - idle
+
+
 def degenerate_policy_cost(
     n_hosts: int,
     horizon: int,
