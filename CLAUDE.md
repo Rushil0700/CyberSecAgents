@@ -443,6 +443,20 @@ property of the reward function, so **any reward change re-opens the question** 
 potential-based shaping moved red's returns from ≈ +15 to ≈ −100 and silently re-armed
 this trap on an agent that had previously been fine.
 
+### 3.25 A return is only comparable within one reward function (Phase 4)
+
+`EpisodeRecord.blue_return` is `returns["B_corp"]`. Under `RewardStructure.SHARED` that is
+the whole defending team's value; under `INDIVIDUAL` it is one defender's slice of it. The
+two are **different quantities**, and a table putting them in one column invites a
+comparison that means nothing — the same category error as comparing red's return across
+shaping modes, where potential-based shaping moved the scale by ~100 without any behaviour
+changing.
+
+**Compare behaviour, not price.** Attacker success, false positives per episode, MTTD and
+layers breached are properties of what the agents *did* and survive a change of reward
+function; returns do not. `experiments/phase4.py` prints the warning above its own table,
+because the trap is invisible in the numbers themselves — both columns look like returns.
+
 **Phase 3 — measured, with an honest caveat.** Red learns with the curriculum
 (`PROJECT.md` §7.4). Write-up: `notes/phase3-curriculum.md`. 300 tests.
 

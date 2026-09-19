@@ -183,6 +183,9 @@ def main() -> None:
             ctrl = warm_started_controllers(sc, seed, args.warm)
             run = train_alternating(sc, alt_cfg, blue_config(args.episodes_per_phase),
                                     controllers=ctrl, verbose=False)
+            print(f"  {key} seed {seed}: attacker "
+                  f"{run.phases[-1].attacker_success:.1%}  "
+                  f"instability {instability(run.phases):.3f}", flush=True)
             results[key].append({
                 **score(sc, run.controllers),
                 "instability": instability(run.phases),
@@ -202,6 +205,7 @@ def main() -> None:
             **score(sc, run.controllers),
             "instability": instability(run.phases),
         })
+        print(f"  iql seed {seed}: instability {instability(run.phases):.3f}", flush=True)
         if seed == seeds[0]:
             phase_traces["iql"] = run.phases
 
