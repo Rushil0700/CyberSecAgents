@@ -97,7 +97,7 @@ class RewardConfig:
     step_cost: float = -1.0
 
     availability_cost: AvailabilityCost = AvailabilityCost.PER_STEP
-    shaping: RewardShaping = RewardShaping.POTENTIAL_BASED
+    shaping: RewardShaping = RewardShaping.RAW_LADDER
 
     # Must match the learner's discount factor. If the two drift apart the Ng et al.
     # invariance guarantee no longer holds -- the shaping stops being free and starts

@@ -20,6 +20,7 @@ from marlsoc.env.state import EpisodeState
 ONE_SHOT = RewardConfig(availability_cost=AvailabilityCost.ONE_SHOT)
 PER_STEP = RewardConfig(availability_cost=AvailabilityCost.PER_STEP)
 RAW = RewardConfig(shaping=RewardShaping.RAW_LADDER)
+POTENTIAL = RewardConfig(shaping=RewardShaping.POTENTIAL_BASED)
 
 
 def fresh() -> EpisodeState:
@@ -114,7 +115,7 @@ class TestRedLadder:
         state = fresh()
         state.record_breach(Layer.PERIMETER)
         events = StepEvents(layers_breached=[Layer.PERIMETER], potential_before=0.0)
-        got = rw.red_reward(state, events) - rw.DEFAULT.step_cost
+        got = rw.red_reward(state, events, POTENTIAL) - POTENTIAL.step_cost
         assert got == pytest.approx(0.95 * 10.0)
 
     def test_potential_shaping_sums_to_zero_over_a_trajectory(self) -> None:
@@ -127,7 +128,7 @@ class TestRedLadder:
         and cannot change which policy is optimal. It only moves value around *inside*
         the episode, which is what makes it steer exploration for free.
         """
-        gamma = rw.DEFAULT.shaping_gamma
+        gamma = POTENTIAL.shaping_gamma
         state = fresh()
         total, phi_before = 0.0, 0.0
         for t, layer in enumerate(Layer):
@@ -135,7 +136,7 @@ class TestRedLadder:
             terminal = layer is Layer.APPROVAL
             events = StepEvents(layers_breached=[layer], potential_before=phi_before,
                                 terminal=terminal)
-            shaped = rw.red_reward(state, events) - rw.DEFAULT.step_cost
+            shaped = rw.red_reward(state, events, POTENTIAL) - POTENTIAL.step_cost
             total += (gamma ** t) * shaped
             phi_before = 0.0 if terminal else lyr.cumulative_breach_reward(
                 state.paid_breaches)
@@ -216,6 +217,7 @@ class TestSharedRewards:
         # One red_reward function, not two: whichever attacker moved the ladder, both
         # are paid for it.
         assert rw.red_reward(state, events) > rw.DEFAULT.step_cost
+        assert rw.red_reward(state, events, POTENTIAL) > POTENTIAL.step_cost
 
 
 class TestConfigBaselines:
@@ -279,3 +281,24 @@ class TestPreventionIsCheapButNotFree:
         assert state.blocked_count == 1
         state.step = 99
         assert state.blocked_count == 0
+
+
+class TestTheTwoDefaultsAgree:
+    """``ScenarioConfig.shaping`` and ``RewardConfig.shaping`` must not drift apart.
+
+    They are two spellings of one decision. When they disagreed, the environment priced
+    steps one way while every direct call to ``rw.red_reward`` priced them another, and
+    the only thing that noticed was a single test comparing the two.
+    """
+
+    def test_the_scenario_and_reward_defaults_match(self) -> None:
+        from marlsoc.config import ScenarioConfig
+        assert ScenarioConfig().shaping is rw.DEFAULT.shaping
+
+    def test_the_default_is_the_one_red_can_actually_learn_from(self) -> None:
+        """CLAUDE.md 3.18: potential-based shaping sums to zero over a trajectory, which
+        leaves red's incentive too small to cover the -50 detection cliff. Measured over
+        three seeds against a static defence: 66.7% attacker success at depth 5.00 under
+        the ladder, against 0.0% at depth 0.00 under potential-based shaping."""
+        from marlsoc.config import RewardShaping
+        assert rw.DEFAULT.shaping is RewardShaping.RAW_LADDER

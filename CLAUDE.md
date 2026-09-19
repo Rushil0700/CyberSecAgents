@@ -301,10 +301,26 @@ change which policy is optimal rather than just how fast it is found. A flat run
 *keeps* is not potential-based — nothing claws it back at termination, so collecting
 shaping and then losing on purpose is a policy the reward function permits.
 
-`Φ` is now the banked ladder value and the credit is `γΦ(s') − Φ(s)`, so the discounted
-sum telescopes to `γ^T Φ(s_T) − Φ(s_0)` — zero at both ends. The shaping steers
-exploration for free and cannot be a destination. `config.RewardShaping.RAW_LADDER` keeps
-the old behaviour for the before/after, exactly as `AvailabilityCost.ONE_SHOT` does.
+`Φ` is the banked ladder value and the credit is `γΦ(s') − Φ(s)`, so the discounted sum
+telescopes to `γ^T Φ(s_T) − Φ(s_0)` — zero at both ends.
+
+**And that is why `RAW_LADDER` remains the default.** Zero at both ends means the shaping
+contributes *exactly nothing* to the discounted return, so red's only incentive is the
+terminal +100. At γ = 0.95 over ~29 steps that is +22.6 against −15.5 of step costs, and a
+single −50 detection — charged by the alert process **even against a static defence**,
+because detection is environmental rather than defender-driven — makes winning ≈ −23
+against ≈ −20 for idling. **Idling wins, and red correctly learns to do nothing.** Measured
+over three seeds, 4,000 episodes against a static defence:
+
+    raw_ladder        attacker 66.7%   mean depth 5.00 of 6
+    potential_based   attacker  0.0%   mean depth 0.00 of 6   (literally never breaches L1)
+
+§5.4's ladder was never there to preserve optimality — it was there to make a problem
+Phase 1 measured as unlearnable (0% wins, depth 0.78 of 6) learnable. **Guaranteeing that
+shaping changes nothing guarantees it does not help.** Keep `POTENTIAL_BASED` available:
+the comparison is a real result, a famous theorem's limit demonstrated rather than cited.
+A correct theorem can still be the wrong engineering decision, and "theoretically sound"
+is not the same claim as "works here".
 
 Two consequences worth stating. `Φ` reads the **paid** breach set, not the currently-
 breached one, or blue repairing a layer would lower red's potential and hand it a fresh

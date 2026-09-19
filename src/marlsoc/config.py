@@ -60,9 +60,26 @@ class RewardShaping(str, Enum):
     which is zero at both ends -- so the shaping shapes the *value function* and steers
     exploration without being a destination red can settle for.
 
-    RAW_LADDER is kept deliberately, exactly as ``AvailabilityCost.ONE_SHOT`` is: the
-    before/after is what makes the change mean something rather than being an unmotivated
-    rewrite of a reward function that was in the spec.
+    **RAW_LADDER is the default, and that is a measured decision, not an oversight.**
+    Potential-based shaping contributes *exactly zero* to the discounted return -- that is
+    the theorem, not a side effect -- so red's only remaining incentive is the terminal
+    +100. Discounted over the ~29 steps to the crown jewel at gamma = 0.95 that is worth
+    about +22.6 against step costs of about -15.5, and a single -50 detection (which the
+    alert process charges **even against a static defence**, since detection is
+    environmental rather than defender-driven) turns winning into roughly -23 against
+    about -20 for idling. Idling wins. Measured over three seeds against a static defence,
+    4,000 episodes:
+
+        raw_ladder        attacker 66.7%   mean depth 5.00 of 6
+        potential_based   attacker  0.0%   mean depth 0.00 of 6
+
+    The ladder was never there to preserve optimality; it was there to make a problem
+    Phase 1 measured as unlearnable (0% wins at depth 0.78 of 6) learnable. Guaranteeing
+    that shaping changes nothing guarantees it does not help.
+
+    POTENTIAL_BASED is kept because the comparison above is a genuine result: it is the
+    limit of a famous theorem, demonstrated rather than cited. Use it with a discount
+    factor and terminal reward large enough that the true objective dominates.
     """
 
     RAW_LADDER = "raw_ladder"
@@ -121,7 +138,7 @@ class ScenarioConfig:
     seed: int = 0
     agents: dict[str, AgentConfig] = field(default_factory=dict)
     availability_cost: AvailabilityCost = AvailabilityCost.PER_STEP
-    shaping: RewardShaping = RewardShaping.POTENTIAL_BASED
+    shaping: RewardShaping = RewardShaping.RAW_LADDER
     max_layer: int = 6
     step_limit: int = 250
 
